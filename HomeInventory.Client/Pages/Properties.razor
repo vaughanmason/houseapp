@@ -3,8 +3,387 @@
 
 <PageTitle>Properties & rooms</PageTitle>
 <h1>Properties & rooms</h1>
-@* TODO: Add floors, property purchase details/photos, and room measurements, surfaces, fixtures, and utility views. *@
-<div class="row g-4"><div class="col-lg-5"><div class="card card-body"><h2 class="h4">Add property</h2><input class="form-control mb-2" @bind="propertyName" placeholder="Property name" /><input class="form-control mb-2" @bind="propertyAddress" placeholder="Address (optional)" /><button class="btn btn-primary" @onclick="AddProperty">Save property</button></div></div><div class="col-lg-7"><h2 class="h4">Your properties</h2><ul class="list-group">@foreach(var p in properties){<li class="list-group-item"><strong>@p.Name</strong><br/><span class="text-muted">@p.Address</span></li>}</ul></div></div>
-<hr class="my-4"/><div class="row g-4"><div class="col-lg-5"><div class="card card-body"><h2 class="h4">Add room</h2><select class="form-select mb-2" @bind="roomPropertyId"><option value="">Choose property</option>@foreach(var p in properties){<option value="@p.Id">@p.Name</option>}</select><input class="form-control mb-2" @bind="roomName" placeholder="Room name" /><input class="form-control mb-2" @bind="roomType" placeholder="Type (e.g. Bedroom)" /><button class="btn btn-primary" @onclick="AddRoom">Save room</button></div></div><div class="col-lg-7"><h2 class="h4">Rooms</h2><ul class="list-group">@foreach(var r in rooms){<li class="list-group-item"><strong>@r.Name</strong> <span class="text-muted">@r.Type</span></li>}</ul></div></div>
-@if(error is not null){<p class="alert alert-danger mt-3">@error</p>}
-@code { List<PropertyDto> properties=[];List<RoomDto> rooms=[];string propertyName="",propertyAddress="",roomPropertyId="",roomName="",roomType="";string? error;protected override async Task OnInitializedAsync()=>await Load();async Task Load(){properties=await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties")??[];rooms=await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms")??[];}async Task AddProperty(){error=null;var r=await Http.PostAsJsonAsync("api/properties",new PropertyInput(propertyName,propertyAddress,null,null));if(!r.IsSuccessStatusCode){error=await r.Content.ReadAsStringAsync();return;}propertyName=propertyAddress="";await Load();}async Task AddRoom(){if(!Guid.TryParse(roomPropertyId,out var id)){error="Choose a property first.";return;}var r=await Http.PostAsJsonAsync("api/rooms",new RoomInput(id,roomName,roomType,null,null,null,null));if(!r.IsSuccessStatusCode){error=await r.Content.ReadAsStringAsync();return;}roomName=roomType="";await Load();} }
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">Add property</h2>
+            <input class="form-control mb-2" @bind="propertyName" placeholder="Property name" />
+            <input class="form-control mb-2" @bind="propertyAddress" placeholder="Address (optional)" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="propertyPurchaseDate" placeholder="YYYY-MM-DD" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="propertyPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
+            </div>
+            <input class="form-control mb-2" @bind="propertyFloorArea" type="number" step="0.01" placeholder="Floor area" />
+            <textarea class="form-control mb-2" @bind="propertyNotes" placeholder="Notes"></textarea>
+            <button class="btn btn-primary" @onclick="AddProperty">Save property</button>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <h2 class="h4">Your properties</h2>
+        <ul class="list-group">
+            @foreach (var p in properties)
+            {
+                <li class="list-group-item">
+                    @if (editingPropertyId == p.Id)
+                    {
+                        <input class="form-control mb-2" @bind="editPropertyName" />
+                        <input class="form-control mb-2" @bind="editPropertyAddress" />
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6"><input class="form-control" @bind="editPropertyPurchaseDate" placeholder="YYYY-MM-DD" /></div>
+                            <div class="col-md-6"><input class="form-control" @bind="editPropertyPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
+                        </div>
+                        <input class="form-control mb-2" @bind="editPropertyFloorArea" type="number" step="0.01" placeholder="Floor area" />
+                        <textarea class="form-control mb-2" @bind="editPropertyNotes"></textarea>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success btn-sm" @onclick="() => SavePropertyEdit(p.Id)">Save</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelPropertyEdit">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <strong>@p.Name</strong>
+                        <div class="text-muted">@p.Address</div>
+                        <div class="small text-muted">Purchased: @FormatDate(p.PurchaseDate) · Price: @FormatMoney(p.PurchasePrice) · Floor area: @FormatNumber(p.FloorArea)</div>
+                        <div class="small mb-2">@p.Notes</div>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => StartPropertyEdit(p)">Edit</button>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">Add room</h2>
+            <select class="form-select mb-2" @bind="roomPropertyId">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            <input class="form-control mb-2" @bind="roomName" placeholder="Room name" />
+            <input class="form-control mb-2" @bind="roomType" placeholder="Type (e.g. Bedroom)" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-4"><input class="form-control" @bind="roomLength" type="number" step="0.01" placeholder="Length" /></div>
+                <div class="col-md-4"><input class="form-control" @bind="roomWidth" type="number" step="0.01" placeholder="Width" /></div>
+                <div class="col-md-4"><input class="form-control" @bind="roomHeight" type="number" step="0.01" placeholder="Height" /></div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-4"><input class="form-control" @bind="roomArea" type="number" step="0.01" placeholder="Area" /></div>
+                <div class="col-md-4"><input class="form-control" @bind="roomVolume" type="number" step="0.01" placeholder="Volume" /></div>
+                <div class="col-md-4"><input class="form-control" @bind="roomCeilingHeight" type="number" step="0.01" placeholder="Ceiling height" /></div>
+            </div>
+            <input class="form-control mb-2" @bind="roomFlooring" placeholder="Flooring" />
+            <input class="form-control mb-2" @bind="roomWallFinish" placeholder="Wall finish" />
+            <input class="form-control mb-2" @bind="roomCeilingFinish" placeholder="Ceiling finish" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="roomWindowsCount" type="number" placeholder="Windows count" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="roomDoorsCount" type="number" placeholder="Doors count" /></div>
+            </div>
+            <textarea class="form-control mb-2" @bind="roomFixturesNotes" placeholder="Fixtures notes"></textarea>
+            <textarea class="form-control mb-2" @bind="roomUtilitiesNotes" placeholder="Utilities notes"></textarea>
+            <textarea class="form-control mb-2" @bind="roomNotes" placeholder="Notes"></textarea>
+            <button class="btn btn-primary" @onclick="AddRoom">Save room</button>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <h2 class="h4">Rooms</h2>
+        <ul class="list-group">
+            @foreach (var r in rooms)
+            {
+                <li class="list-group-item">
+                    @if (editingRoomId == r.Id)
+                    {
+                        <select class="form-select mb-2" @bind="editRoomPropertyId">
+                            <option value="">Choose property</option>
+                            @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+                        </select>
+                        <input class="form-control mb-2" @bind="editRoomName" />
+                        <input class="form-control mb-2" @bind="editRoomType" />
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-4"><input class="form-control" @bind="editRoomLength" type="number" step="0.01" placeholder="Length" /></div>
+                            <div class="col-md-4"><input class="form-control" @bind="editRoomWidth" type="number" step="0.01" placeholder="Width" /></div>
+                            <div class="col-md-4"><input class="form-control" @bind="editRoomHeight" type="number" step="0.01" placeholder="Height" /></div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-4"><input class="form-control" @bind="editRoomArea" type="number" step="0.01" placeholder="Area" /></div>
+                            <div class="col-md-4"><input class="form-control" @bind="editRoomVolume" type="number" step="0.01" placeholder="Volume" /></div>
+                            <div class="col-md-4"><input class="form-control" @bind="editRoomCeilingHeight" type="number" step="0.01" placeholder="Ceiling height" /></div>
+                        </div>
+                        <input class="form-control mb-2" @bind="editRoomFlooring" placeholder="Flooring" />
+                        <input class="form-control mb-2" @bind="editRoomWallFinish" placeholder="Wall finish" />
+                        <input class="form-control mb-2" @bind="editRoomCeilingFinish" placeholder="Ceiling finish" />
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6"><input class="form-control" @bind="editRoomWindowsCount" type="number" placeholder="Windows count" /></div>
+                            <div class="col-md-6"><input class="form-control" @bind="editRoomDoorsCount" type="number" placeholder="Doors count" /></div>
+                        </div>
+                        <textarea class="form-control mb-2" @bind="editRoomFixturesNotes"></textarea>
+                        <textarea class="form-control mb-2" @bind="editRoomUtilitiesNotes"></textarea>
+                        <textarea class="form-control mb-2" @bind="editRoomNotes"></textarea>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success btn-sm" @onclick="() => SaveRoomEdit(r.Id)">Save</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelRoomEdit">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <strong>@r.Name</strong> <span class="text-muted">@r.Type</span>
+                        <div class="small text-muted">Area: @FormatNumber(r.Area) · Volume: @FormatNumber(r.Volume) · Ceiling: @FormatNumber(r.CeilingHeight)</div>
+                        <div class="small text-muted mb-2">Flooring: @r.Flooring · Wall: @r.WallFinish · Ceiling: @r.CeilingFinish</div>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => StartRoomEdit(r)">Edit</button>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">Paint library</h2>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="paintBrand" placeholder="Brand" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="paintColorName" placeholder="Colour name" /></div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="paintColorCode" placeholder="Colour code" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="paintFinish" placeholder="Finish" /></div>
+            </div>
+            <textarea class="form-control mb-2" @bind="paintNotes" placeholder="Notes"></textarea>
+            <button class="btn btn-primary mb-3" @onclick="SavePaint">@((editingPaintId is null) ? "Add paint" : "Update paint")</button>
+            @if (editingPaintId is not null)
+            {
+                <button class="btn btn-outline-secondary mb-3 ms-2" @onclick="CancelPaintEdit">Cancel</button>
+            }
+            <ul class="list-group">
+                @foreach (var paint in paints)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><strong>@paint.Brand</strong> @paint.ColorName <span class="text-muted">@paint.ColorCode @paint.Finish</span></span>
+                        <span>
+                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartPaintEdit(paint)">Edit</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePaint(paint.Id)">Delete</button>
+                        </span>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">Room paint colours</h2>
+            <select class="form-select mb-2" @bind="roomPaintRoomId" @bind:after="LoadRoomPaints">
+                <option value="">Choose room</option>
+                @foreach (var room in rooms) { <option value="@room.Id">@room.Name</option> }
+            </select>
+            <select class="form-select mb-2" @bind="roomPaintPaintId">
+                <option value="">Choose paint</option>
+                @foreach (var paint in paints) { <option value="@paint.Id">@paint.Brand @paint.ColorName (@paint.ColorCode)</option> }
+            </select>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="roomPaintSurface" placeholder="Surface (e.g. North wall)" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="roomPaintSortOrder" type="number" placeholder="Sort order" /></div>
+            </div>
+            <button class="btn btn-outline-primary mb-3" @onclick="AddRoomPaint">Assign paint</button>
+            <ul class="list-group">
+                @foreach (var item in roomPaints)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><strong>@item.Brand</strong> @item.ColorName <span class="text-muted">@item.ColorCode @item.Finish · @item.Surface</span></span>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveRoomPaint(item.PaintId)">Remove</button>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <p class="alert alert-danger mt-3">@error</p>
+}
+
+@code {
+    List<PropertyDto> properties = [];
+    List<RoomDto> rooms = [];
+    List<PaintDto> paints = [];
+    List<RoomPaintDto> roomPaints = [];
+
+    string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyNotes = "";
+    string roomPropertyId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "", roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "", roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
+
+    Guid? editingPropertyId;
+    string editPropertyName = "", editPropertyAddress = "", editPropertyPurchaseDate = "", editPropertyPurchasePrice = "", editPropertyFloorArea = "", editPropertyNotes = "";
+
+    Guid? editingRoomId;
+    string editRoomPropertyId = "", editRoomName = "", editRoomType = "", editRoomArea = "", editRoomVolume = "", editRoomCeilingHeight = "", editRoomLength = "", editRoomWidth = "", editRoomHeight = "", editRoomFlooring = "", editRoomWallFinish = "", editRoomCeilingFinish = "", editRoomWindowsCount = "", editRoomDoorsCount = "", editRoomFixturesNotes = "", editRoomUtilitiesNotes = "", editRoomNotes = "";
+
+    Guid? editingPaintId;
+    string paintBrand = "", paintColorName = "", paintColorCode = "", paintFinish = "", paintNotes = "";
+
+    string roomPaintRoomId = "", roomPaintPaintId = "", roomPaintSurface = "", roomPaintSortOrder = "0";
+    string? error;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    async Task Load()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+        paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
+    }
+
+    async Task AddProperty()
+    {
+        error = null;
+        var response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        propertyName = propertyAddress = propertyPurchaseDate = propertyPurchasePrice = propertyFloorArea = propertyNotes = "";
+        await Load();
+    }
+
+    async Task AddRoom()
+    {
+        error = null;
+        if (!Guid.TryParse(roomPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        var response = await Http.PostAsJsonAsync("api/rooms", new RoomInput(propertyId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        roomName = roomType = roomArea = roomVolume = roomCeilingHeight = roomLength = roomWidth = roomHeight = roomFlooring = roomWallFinish = roomCeilingFinish = roomWindowsCount = roomDoorsCount = roomFixturesNotes = roomUtilitiesNotes = roomNotes = "";
+        await Load();
+    }
+
+    void StartPropertyEdit(PropertyDto property)
+    {
+        editingPropertyId = property.Id;
+        editPropertyName = property.Name;
+        editPropertyAddress = property.Address ?? "";
+        editPropertyPurchaseDate = property.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        editPropertyPurchasePrice = property.PurchasePrice?.ToString() ?? "";
+        editPropertyFloorArea = property.FloorArea?.ToString() ?? "";
+        editPropertyNotes = property.Notes ?? "";
+    }
+
+    void CancelPropertyEdit() => editingPropertyId = null;
+
+    async Task SavePropertyEdit(Guid id)
+    {
+        error = null;
+        var response = await Http.PutAsJsonAsync($"api/properties/{id}", new PropertyInput(editPropertyName, editPropertyAddress, TryDate(editPropertyPurchaseDate), TryDecimal(editPropertyPurchasePrice), TryDecimal(editPropertyFloorArea), editPropertyNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        editingPropertyId = null;
+        await Load();
+    }
+
+    void StartRoomEdit(RoomDto room)
+    {
+        editingRoomId = room.Id;
+        editRoomPropertyId = room.PropertyId.ToString();
+        editRoomName = room.Name;
+        editRoomType = room.Type ?? "";
+        editRoomArea = room.Area?.ToString() ?? "";
+        editRoomVolume = room.Volume?.ToString() ?? "";
+        editRoomCeilingHeight = room.CeilingHeight?.ToString() ?? "";
+        editRoomLength = room.Length?.ToString() ?? "";
+        editRoomWidth = room.Width?.ToString() ?? "";
+        editRoomHeight = room.Height?.ToString() ?? "";
+        editRoomFlooring = room.Flooring ?? "";
+        editRoomWallFinish = room.WallFinish ?? "";
+        editRoomCeilingFinish = room.CeilingFinish ?? "";
+        editRoomWindowsCount = room.WindowsCount?.ToString() ?? "";
+        editRoomDoorsCount = room.DoorsCount?.ToString() ?? "";
+        editRoomFixturesNotes = room.FixturesNotes ?? "";
+        editRoomUtilitiesNotes = room.UtilitiesNotes ?? "";
+        editRoomNotes = room.Notes ?? "";
+    }
+
+    void CancelRoomEdit() => editingRoomId = null;
+
+    async Task SaveRoomEdit(Guid id)
+    {
+        error = null;
+        if (!Guid.TryParse(editRoomPropertyId, out var propertyId)) { error = "Choose a valid property for the room."; return; }
+        var response = await Http.PutAsJsonAsync($"api/rooms/{id}", new RoomInput(propertyId, editRoomName, editRoomType, TryDecimal(editRoomArea), TryDecimal(editRoomVolume), TryDecimal(editRoomCeilingHeight), TryDecimal(editRoomLength), TryDecimal(editRoomWidth), TryDecimal(editRoomHeight), editRoomFlooring, editRoomWallFinish, editRoomCeilingFinish, null, TryInt(editRoomWindowsCount), TryInt(editRoomDoorsCount), editRoomFixturesNotes, editRoomUtilitiesNotes, editRoomNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        editingRoomId = null;
+        await Load();
+    }
+
+    void StartPaintEdit(PaintDto paint)
+    {
+        editingPaintId = paint.Id;
+        paintBrand = paint.Brand;
+        paintColorName = paint.ColorName;
+        paintColorCode = paint.ColorCode ?? "";
+        paintFinish = paint.Finish ?? "";
+        paintNotes = paint.Notes ?? "";
+    }
+
+    void CancelPaintEdit()
+    {
+        editingPaintId = null;
+        paintBrand = paintColorName = paintColorCode = paintFinish = paintNotes = "";
+    }
+
+    async Task SavePaint()
+    {
+        error = null;
+        HttpResponseMessage response;
+        if (editingPaintId is null)
+            response = await Http.PostAsJsonAsync("api/paints", new PaintInput(paintBrand, paintColorName, paintColorCode, paintFinish, paintNotes));
+        else
+            response = await Http.PutAsJsonAsync($"api/paints/{editingPaintId}", new PaintInput(paintBrand, paintColorName, paintColorCode, paintFinish, paintNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        CancelPaintEdit();
+        await Load();
+        await LoadRoomPaints();
+    }
+
+    async Task DeletePaint(Guid paintId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/paints/{paintId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await Load();
+        await LoadRoomPaints();
+    }
+
+    async Task LoadRoomPaints()
+    {
+        roomPaints = [];
+        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) return;
+        roomPaints = await Http.GetFromJsonAsync<List<RoomPaintDto>>($"api/rooms/{roomId}/paints") ?? [];
+    }
+
+    async Task AddRoomPaint()
+    {
+        error = null;
+        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        if (!Guid.TryParse(roomPaintPaintId, out var paintId)) { error = "Choose a paint first."; return; }
+        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/paints", new RoomPaintInput(paintId, TryInt(roomPaintSortOrder) ?? 0, roomPaintSurface));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        roomPaintPaintId = roomPaintSurface = ""; roomPaintSortOrder = "0";
+        await LoadRoomPaints();
+    }
+
+    async Task RemoveRoomPaint(Guid paintId)
+    {
+        error = null;
+        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        var response = await Http.DeleteAsync($"api/rooms/{roomId}/paints/{paintId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadRoomPaints();
+    }
+
+    static DateOnly? TryDate(string value) => DateOnly.TryParse(value, out var parsed) ? parsed : (DateOnly?)null;
+    static decimal? TryDecimal(string value) => decimal.TryParse(value, out var parsed) ? parsed : (decimal?)null;
+    static int? TryInt(string value) => int.TryParse(value, out var parsed) ? parsed : (int?)null;
+    static string FormatDate(DateOnly? value) => value?.ToString("yyyy-MM-dd") ?? "-";
+    static string FormatMoney(decimal? value) => value?.ToString("C") ?? "-";
+    static string FormatNumber(decimal? value) => value?.ToString("0.##") ?? "-";
+}
