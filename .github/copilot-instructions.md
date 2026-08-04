@@ -1,5 +1,9 @@
 # Home Inventory Copilot Instructions
 
+## Planning artifacts
+
+- Store all plans in `.github\Plans\`.
+
 ## Commands
 
 ```powershell
