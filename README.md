@@ -25,6 +25,27 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Dashboard summary metrics and category totals, including fixture and photo-backed inventory context
 - Text search across asset names/categories/brands/serial numbers and fixture names/types
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
+- **Enhanced UI with multi-page organization** for improved user experience
+
+## UI Architecture
+
+The application uses a multi-page, component-based architecture to organize functionality by entity type:
+
+| Page | Purpose | Features |
+|------|---------|----------|
+| **Properties** | Manage properties and property photos | Add/edit properties with currency selection, manage property-level photos |
+| **Floors** | Organize property floors | Create and manage floors by property with notes and sorting |
+| **Rooms** | Rooms and surface management | Complete room metadata (dimensions, finishes, utilities), surface management (wall, ceiling, flooring, trim) |
+| **Fixtures** | Permanent room fixtures | Fixture lifecycle (purchase, installation, maintenance), financial tracking, photos, warranty info |
+| **Paints** | Paint library and assignments | Global paint registry, assign colors to room surfaces with installation date and notes |
+| **Assets & Storage** | Assets and storage organization | Asset catalog with valuation and location tracking, storage location hierarchy, asset search/filter, photo management |
+
+### Reusable Components
+
+- **CurrencyDisplay** – Format monetary values with currency codes
+- **Breadcrumb** – Navigation path context (foundation for future multi-level navigation)
+- **ConfirmDialog** – Delete confirmation dialogs with customizable messaging
+- **PropertySelector** – Property dropdown for filtering entity lists by property
 
 ## API Endpoints (`/api`)
 
