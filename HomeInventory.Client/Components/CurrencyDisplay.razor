@@ -1,0 +1,25 @@
+@using System.Globalization
+
+@if (Value is null)
+{
+    <span>-</span>
+}
+else
+{
+    <span>@FormatMoney(Value.Value, CurrencyCode)</span>
+}
+
+@code {
+    [Parameter]
+    public decimal? Value { get; set; }
+
+    [Parameter]
+    public string? CurrencyCode { get; set; }
+
+    private string FormatMoney(decimal value, string? currencyCode = null)
+    {
+        if (value == 0) return $"{(string.IsNullOrWhiteSpace(currencyCode) ? "USD" : currencyCode.Trim().ToUpperInvariant())} 0.00";
+        var currency = string.IsNullOrWhiteSpace(currencyCode) ? "USD" : currencyCode.Trim().ToUpperInvariant();
+        return $"{currency} {value.ToString("0.00", CultureInfo.InvariantCulture)}";
+    }
+}

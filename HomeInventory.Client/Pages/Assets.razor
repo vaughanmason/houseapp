@@ -2,8 +2,383 @@
 @inject HttpClient Http
 @using System.Globalization
 
-<PageTitle>Assets</PageTitle><h1>Assets</h1>
-@* TODO: Add asset editing, movement, full metadata, photo/document upload, and barcode/QR workflows after their API support is implemented. *@
-<div class="card card-body mb-4"><h2 class="h4">Add asset</h2><div class="row g-2"><div class="col-md-4"><select class="form-select" @bind="propertyId"><option value="">Property</option>@foreach(var p in properties){<option value="@p.Id">@p.Name</option>}</select></div><div class="col-md-4"><input class="form-control" @bind="name" placeholder="Asset name" /></div><div class="col-md-4"><input class="form-control" @bind="category" placeholder="Category" /></div><div class="col-md-4"><input class="form-control" @bind="brand" placeholder="Brand" /></div><div class="col-md-4"><input class="form-control" @bind="model" placeholder="Model" /></div><div class="col-md-4"><input class="form-control" @bind="value" type="number" step="0.01" placeholder="Current value" /></div><div class="col-12"><select class="form-select" @bind="locationId"><option value="">No storage location</option>@foreach(var l in locations.Where(x=>x.PropertyId.ToString()==propertyId)){<option value="@l.Id">@l.Path</option>}</select></div><div class="col-12"><button class="btn btn-primary" @onclick="Add">Save asset</button></div></div></div>
-<table class="table align-middle"><thead><tr><th>Asset</th><th>Location</th><th>Value</th><th></th></tr></thead><tbody>@foreach(var asset in assets){<tr><td><strong>@asset.Name</strong><br/><span class="text-muted">@asset.Category · @asset.Brand @asset.Model</span></td><td>@asset.LocationPath</td><td>@FormatMoney(asset.CurrentValue, GetPropertyCurrency(asset.PropertyId))</td><td><button class="btn btn-sm btn-outline-secondary" @onclick="()=>Archive(asset.Id)">Archive</button></td></tr>}</tbody></table>@if(error is not null){<p class="alert alert-danger">@error</p>}
-@code {List<PropertyDto> properties=[];List<StorageLocationDto> locations=[];List<AssetDto> assets=[];string propertyId="",locationId="",name="",category="",brand="",model="",value="";string? error;protected override async Task OnInitializedAsync()=>await Load();async Task Load(){properties=await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties")??[];locations=await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations")??[];assets=await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false")??[];}string GetPropertyCurrency(Guid? propertyId)=>properties.FirstOrDefault(x=>x.Id==propertyId)?.Currency??"USD";static string FormatMoney(decimal? value,string? currencyCode=null){if(value is null)return"-";var currency=string.IsNullOrWhiteSpace(currencyCode)?"USD":currencyCode.Trim().ToUpperInvariant();return $"{currency} {value.Value.ToString("0.00", CultureInfo.InvariantCulture)}";}async Task Add(){if(!Guid.TryParse(propertyId,out var p)){error="Choose a property.";return;}var l=Guid.TryParse(locationId,out var parsed)?parsed:(Guid?)null;decimal? v=decimal.TryParse(value,out var d)?d:null;var r=await Http.PostAsJsonAsync("api/assets",new AssetInput(p,null,l,name,category,null,brand,model,null,null,null,v,null,null));if(!r.IsSuccessStatusCode){error=await r.Content.ReadAsStringAsync();return;}name=category=brand=model=value=locationId="";await Load();}async Task Archive(Guid id){await Http.PostAsync($"api/assets/{id}/archive",null);await Load();}}
+<PageTitle>Assets & Storage</PageTitle>
+
+<div class="mb-4">
+    <h1>Assets & Storage</h1>
+    <p class="lead">Manage your assets and their storage locations.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">@(editingAssetId is null ? "Add asset" : "Edit asset")</h2>
+            <select class="form-select mb-2" @bind="propertyId" @bind:after="RefreshLocationsAndRooms">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            
+            @if (!string.IsNullOrEmpty(propertyId))
+            {
+                <select class="form-select mb-2" @bind="roomId">
+                    <option value="">Room (optional)</option>
+                    @foreach (var room in GetRoomsForProperty()) { <option value="@room.Id">@room.Name</option> }
+                </select>
+                <select class="form-select mb-2" @bind="storageLocationId">
+                    <option value="">Storage location (optional)</option>
+                    @foreach (var location in GetLocationsForProperty()) { <option value="@location.Id">@location.Path</option> }
+                </select>
+            }
+
+            <input class="form-control mb-2" @bind="assetName" placeholder="Asset name" />
+            <input class="form-control mb-2" @bind="assetCategory" placeholder="Category" />
+            <input class="form-control mb-2" @bind="assetDescription" placeholder="Description" />
+
+            <h5 class="mt-3">Identification</h5>
+            <input class="form-control mb-2" @bind="assetBrand" placeholder="Brand" />
+            <input class="form-control mb-2" @bind="assetModel" placeholder="Model" />
+            <input class="form-control mb-2" @bind="assetSerialNumber" placeholder="Serial number" />
+
+            <h5 class="mt-3">Financial</h5>
+            <input class="form-control mb-2" @bind="assetPurchaseDate" placeholder="Purchase date (YYYY-MM-DD)" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="assetPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="assetCurrentValue" type="number" step="0.01" placeholder="Current value" /></div>
+            </div>
+
+            <h5 class="mt-3">Details</h5>
+            <input class="form-control mb-2" @bind="assetCondition" placeholder="Condition" />
+            <textarea class="form-control mb-2" @bind="assetNotes" placeholder="Notes"></textarea>
+
+            <button class="btn btn-primary" @onclick="SaveAsset">@(editingAssetId is null ? "Add asset" : "Update asset")</button>
+            @if (editingAssetId is not null)
+            {
+                <button class="btn btn-outline-secondary ms-2" @onclick="CancelEdit">Cancel</button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <h2 class="h4">Assets</h2>
+        @if (properties.Count == 0)
+        {
+            <div class="alert alert-info">No properties found. <a href="properties">Create a property first</a>.</div>
+        }
+        else if (assets.Count == 0)
+        {
+            <div class="alert alert-info">No assets yet. Add one to the left.</div>
+        }
+        else
+        {
+            <div class="mb-3">
+                <input class="form-control" @bind="searchQuery" @bind:event="oninput" placeholder="Search assets..." />
+            </div>
+            <ul class="list-group">
+                @foreach (var asset in FilteredAssets())
+                {
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>@asset.Name</strong> <span class="text-muted">@asset.Category</span>
+                                @if (!string.IsNullOrEmpty(asset.Description))
+                                {
+                                    <div class="small text-muted">@asset.Description</div>
+                                }
+                                @if (!string.IsNullOrEmpty(asset.Brand) || !string.IsNullOrEmpty(asset.Model))
+                                {
+                                    <div class="small text-muted">@asset.Brand @asset.Model</div>
+                                }
+                                <div class="small text-muted">
+                                    Location: @asset.LocationPath
+                                </div>
+                                @if (asset.PurchasePrice.HasValue || asset.CurrentValue.HasValue)
+                                {
+                                    <div class="small text-muted">
+                                        Purchase: <CurrencyDisplay Value="asset.PurchasePrice" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" /> · 
+                                        Current: <CurrencyDisplay Value="asset.CurrentValue" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" />
+                                    </div>
+                                }
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(asset)">Edit</button>
+                                <button class="btn btn-sm btn-outline-warning me-1" @onclick="() => ArchiveAsset(asset.Id)">Archive</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsset(asset.Id)">Delete</button>
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">Storage Locations</h2>
+            <select class="form-select mb-2" @bind="storagePropertyId">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(storagePropertyId))
+            {
+                <input class="form-control mb-2" @bind="newStorageName" placeholder="Location name" />
+                <input class="form-control mb-2" @bind="newStorageNotes" placeholder="Notes" />
+                <button class="btn btn-outline-primary" @onclick="AddStorageLocation">Add location</button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <h2 class="h4">All Locations</h2>
+        @if (locations.Count == 0)
+        {
+            <div class="alert alert-info">No storage locations yet.</div>
+        }
+        else
+        {
+            @foreach (var prop in properties.Where(p => locations.Any(l => l.PropertyId == p.Id)))
+            {
+                <div class="mb-3">
+                    <h5>@prop.Name</h5>
+                    <ul class="list-group">
+                        @foreach (var location in locations.Where(l => l.PropertyId == prop.Id).OrderBy(l => l.Path))
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong>@location.Path</strong>
+                                        </div>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStorageLocation(location.Id)">Delete</button>
+                                    </li>
+                        }
+                    </ul>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card card-body">
+            <h2 class="h4">Asset photos</h2>
+            <select class="form-select mb-2" @bind="photoAssetId" @bind:after="LoadPhotos">
+                <option value="">Choose asset</option>
+                @foreach (var asset in assets.OrderBy(a => a.Name)) { <option value="@asset.Id">@asset.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(photoAssetId))
+            {
+                <div class="row g-2 mb-2">
+                    <div class="col-md-7"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key" /></div>
+                    <div class="col-md-5"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
+                </div>
+                <input class="form-control mb-2" @bind="photoSortOrder" type="number" placeholder="Sort order" />
+                <button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button>
+                @if (photos.Count > 0)
+                {
+                    <ul class="list-group">
+                        @foreach (var photo in photos.OrderBy(p => p.SortOrder))
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
+                            </li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <div class="alert alert-info">No photos yet.</div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    List<PropertyDto> properties = [];
+    List<FloorDto> floors = [];
+    List<RoomDto> rooms = [];
+    List<StorageLocationDto> locations = [];
+    List<AssetDto> assets = [];
+    List<AssetPhotoDto> photos = [];
+
+    string propertyId = "", roomId = "", storageLocationId = "", assetName = "", assetCategory = "", assetDescription = "";
+    string assetBrand = "", assetModel = "", assetSerialNumber = "", assetPurchaseDate = "";
+    string assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "";
+    string storagePropertyId = "", newStorageName = "", newStorageNotes = "";
+    string photoAssetId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
+    string searchQuery = "";
+
+    Guid? editingAssetId;
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+        locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
+        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+    }
+
+    void StartEdit(AssetDto asset)
+    {
+        editingAssetId = asset.Id;
+        propertyId = asset.PropertyId.ToString();
+        roomId = asset.RoomId?.ToString() ?? "";
+        storageLocationId = asset.StorageLocationId?.ToString() ?? "";
+        assetName = asset.Name;
+        assetCategory = asset.Category;
+        assetDescription = asset.Description ?? "";
+        assetBrand = asset.Brand ?? "";
+        assetModel = asset.Model ?? "";
+        assetSerialNumber = asset.SerialNumber ?? "";
+        assetPurchaseDate = asset.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        assetPurchasePrice = asset.PurchasePrice?.ToString() ?? "";
+        assetCurrentValue = asset.CurrentValue?.ToString() ?? "";
+        assetCondition = asset.Condition ?? "";
+        assetNotes = asset.Notes ?? "";
+    }
+
+    void CancelEdit()
+    {
+        editingAssetId = null;
+        ClearForm();
+    }
+
+    void ClearForm()
+    {
+        propertyId = roomId = storageLocationId = assetName = assetCategory = assetDescription = "";
+        assetBrand = assetModel = assetSerialNumber = assetPurchaseDate = "";
+        assetPurchasePrice = assetCurrentValue = assetCondition = assetNotes = "";
+    }
+
+    async Task RefreshLocationsAndRooms() => StateHasChanged();
+
+    List<RoomDto> GetRoomsForProperty()
+    {
+        if (!Guid.TryParse(propertyId, out var propId)) return [];
+        var floorIds = floors.Where(f => f.PropertyId == propId).Select(f => f.Id).ToList();
+        return rooms.Where(r => floorIds.Contains(r.FloorId)).ToList();
+    }
+
+    List<StorageLocationDto> GetLocationsForProperty()
+    {
+        if (!Guid.TryParse(propertyId, out var propId)) return [];
+        return locations.Where(l => l.PropertyId == propId).ToList();
+    }
+
+    List<AssetDto> FilteredAssets()
+    {
+        var filtered = assets;
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            var query = searchQuery.ToLower();
+            filtered = filtered.Where(a => 
+                a.Name.ToLower().Contains(query) || 
+                a.Category.ToLower().Contains(query) ||
+                (a.Brand?.ToLower().Contains(query) ?? false) ||
+                (a.Model?.ToLower().Contains(query) ?? false)
+            ).ToList();
+        }
+        return filtered.OrderBy(a => a.Name).ToList();
+    }
+
+    async Task SaveAsset()
+    {
+        error = null;
+        if (!Guid.TryParse(propertyId, out var propId)) { error = "Choose a property first."; return; }
+        if (string.IsNullOrWhiteSpace(assetName) || string.IsNullOrWhiteSpace(assetCategory)) { error = "Asset name and category are required."; return; }
+
+        var roomIdGuid = Guid.TryParse(roomId, out var rid) ? (Guid?)rid : null;
+        var storageLocIdGuid = Guid.TryParse(storageLocationId, out var slid) ? (Guid?)slid : null;
+
+        var response = editingAssetId is null
+            ? await Http.PostAsJsonAsync("api/assets", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes))
+            : await Http.PutAsJsonAsync($"api/assets/{editingAssetId}", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes));
+
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        editingAssetId = null;
+        ClearForm();
+        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+    }
+
+    async Task DeleteAsset(Guid assetId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/assets/{assetId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+    }
+
+    async Task ArchiveAsset(Guid assetId)
+    {
+        error = null;
+        var response = await Http.PostAsync($"api/assets/{assetId}/archive", null);
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+    }
+
+    async Task AddStorageLocation()
+    {
+        error = null;
+        if (!Guid.TryParse(storagePropertyId, out var propId)) { error = "Choose a property first."; return; }
+        if (string.IsNullOrWhiteSpace(newStorageName)) { error = "Location name is required."; return; }
+        var response = await Http.PostAsJsonAsync($"api/properties/{propId}/locations", new StorageLocationInput(propId, null, newStorageName, newStorageNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        newStorageName = newStorageNotes = "";
+        locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
+    }
+
+    async Task DeleteStorageLocation(Guid locationId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/locations/{locationId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
+    }
+
+    async Task LoadPhotos()
+    {
+        photos = [];
+        if (!Guid.TryParse(photoAssetId, out var assetId)) return;
+        photos = await Http.GetFromJsonAsync<List<AssetPhotoDto>>($"api/assets/{assetId}/photos") ?? [];
+    }
+
+    async Task AddPhoto()
+    {
+        error = null;
+        if (!Guid.TryParse(photoAssetId, out var assetId)) { error = "Choose an asset first."; return; }
+        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Provide a storage key for the photo."; return; }
+        var response = await Http.PostAsJsonAsync($"api/assets/{assetId}/photos", new AssetPhotoInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        photoStorageKey = photoCaption = "";
+        photoSortOrder = "0";
+        await LoadPhotos();
+    }
+
+    async Task DeletePhoto(Guid photoId)
+    {
+        error = null;
+        if (!Guid.TryParse(photoAssetId, out var assetId)) { error = "Choose an asset first."; return; }
+        var response = await Http.DeleteAsync($"api/assets/{assetId}/photos/{photoId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadPhotos();
+    }
+
+    string GetPropertyCurrency(Guid? propertyId) => properties.FirstOrDefault(x => x.Id == propertyId)?.Currency ?? "USD";
+    
+    static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
+    static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
+}

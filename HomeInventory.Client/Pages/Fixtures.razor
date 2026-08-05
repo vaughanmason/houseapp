@@ -1,0 +1,277 @@
+@page "/fixtures"
+@inject HttpClient Http
+
+<PageTitle>Fixtures</PageTitle>
+
+<div class="mb-4">
+    <h1>Fixtures</h1>
+    <p class="lead">Manage permanent fixtures in your rooms.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">@(editingFixtureId is null ? "Add fixture" : "Edit fixture")</h2>
+            <select class="form-select mb-2" @bind="roomId">
+                <option value="">Choose room</option>
+                @foreach (var room in rooms.OrderBy(r => r.Name)) { <option value="@room.Id">@room.Name</option> }
+            </select>
+            <input class="form-control mb-2" @bind="fixtureName" placeholder="Fixture name" />
+            <input class="form-control mb-2" @bind="fixtureType" placeholder="Fixture type" />
+
+            <h5 class="mt-3">Identification</h5>
+            <input class="form-control mb-2" @bind="fixtureManufacturer" placeholder="Manufacturer" />
+            <input class="form-control mb-2" @bind="fixtureModel" placeholder="Model" />
+            <input class="form-control mb-2" @bind="fixtureSerialNumber" placeholder="Serial number" />
+
+            <h5 class="mt-3">Financial</h5>
+            <input class="form-control mb-2" @bind="fixturePurchaseDate" placeholder="Purchase date (YYYY-MM-DD)" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="fixturePurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="fixtureCurrentValue" type="number" step="0.01" placeholder="Current value" /></div>
+            </div>
+
+            <h5 class="mt-3">Maintenance</h5>
+            <input class="form-control mb-2" @bind="fixtureWarranty" placeholder="Warranty" />
+            <input class="form-control mb-2" @bind="fixtureManualUrl" placeholder="Manual URL" />
+            <input class="form-control mb-2" @bind="fixtureInstallerName" placeholder="Installer" />
+            <input class="form-control mb-2" @bind="fixtureInstallationDate" placeholder="Installation date (YYYY-MM-DD)" />
+            <input class="form-control mb-2" @bind="fixtureMaintenanceSchedule" placeholder="Maintenance schedule" />
+            <input class="form-control mb-2" @bind="fixtureLastMaintenanceDate" placeholder="Last maintenance (YYYY-MM-DD)" />
+
+            <h5 class="mt-3">Details</h5>
+            <input class="form-control mb-2" @bind="fixtureCondition" placeholder="Condition" />
+            <textarea class="form-control mb-2" @bind="fixtureNotes" placeholder="Notes"></textarea>
+
+            <button class="btn btn-primary" @onclick="SaveFixture">@(editingFixtureId is null ? "Add fixture" : "Update fixture")</button>
+            @if (editingFixtureId is not null)
+            {
+                <button class="btn btn-outline-secondary ms-2" @onclick="CancelEdit">Cancel</button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <h2 class="h4">Fixtures by room</h2>
+        @if (rooms.Count == 0)
+        {
+            <div class="alert alert-info">No rooms found. <a href="rooms">Create a room first</a>.</div>
+        }
+        else if (fixtures.Count == 0)
+        {
+            <div class="alert alert-info">No fixtures yet. Add one to the left.</div>
+        }
+        else
+        {
+            @foreach (var room in rooms.Where(r => fixtures.Any(f => f.RoomId == r.Id)).OrderBy(r => r.Name))
+            {
+                <div class="mb-3">
+                    <h5>@room.Name</h5>
+                    <ul class="list-group">
+                        @foreach (var fixture in fixtures.Where(f => f.RoomId == room.Id).OrderBy(f => f.Name))
+                        {
+                            <li class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong>@fixture.Name</strong> <span class="text-muted">@fixture.Type</span>
+                                        <div class="small text-muted">
+                                            @if (!string.IsNullOrEmpty(fixture.Manufacturer) || !string.IsNullOrEmpty(fixture.Model))
+                                            {
+                                                <div>@fixture.Manufacturer @fixture.Model</div>
+                                            }
+                                        </div>
+                                        @if (fixture.PurchasePrice.HasValue || fixture.CurrentValue.HasValue)
+                                        {
+                                            <div class="small text-muted">
+                                                Purchase: <CurrencyDisplay Value="fixture.PurchasePrice" CurrencyCode="GetPropertyCurrency(fixture)" /> · 
+                                                Current: <CurrencyDisplay Value="fixture.CurrentValue" CurrencyCode="GetPropertyCurrency(fixture)" />
+                                            </div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(fixture.Condition))
+                                        {
+                                            <div class="small text-muted">Condition: @fixture.Condition</div>
+                                        }
+                                    </div>
+                                    <div>
+                                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(fixture)">Edit</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFixture(fixture.Id)">Delete</button>
+                                    </div>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card card-body">
+            <h2 class="h4">Fixture photos</h2>
+            <select class="form-select mb-2" @bind="photoFixtureId" @bind:after="LoadPhotos">
+                <option value="">Choose fixture</option>
+                @foreach (var fixture in fixtures.OrderBy(f => f.Name)) { <option value="@fixture.Id">@fixture.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(photoFixtureId))
+            {
+                <div class="row g-2 mb-2">
+                    <div class="col-md-7"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key" /></div>
+                    <div class="col-md-5"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
+                </div>
+                <input class="form-control mb-2" @bind="photoSortOrder" type="number" placeholder="Sort order" />
+                <button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button>
+                @if (photos.Count > 0)
+                {
+                    <ul class="list-group">
+                        @foreach (var photo in photos.OrderBy(p => p.SortOrder))
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
+                            </li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <div class="alert alert-info">No photos yet.</div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    List<RoomDto> rooms = [];
+    List<FixtureDto> fixtures = [];
+    List<PropertyDto> properties = [];
+    List<FloorDto> floors = [];
+    List<FixturePhotoDto> photos = [];
+
+    string roomId = "", fixtureName = "", fixtureType = "", fixtureManufacturer = "", fixtureModel = "", fixtureSerialNumber = "";
+    string fixturePurchaseDate = "", fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "";
+    string fixtureInstallerName = "", fixtureInstallationDate = "", fixtureMaintenanceSchedule = "", fixtureLastMaintenanceDate = "", fixtureCondition = "", fixtureNotes = "";
+    string photoFixtureId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
+
+    Guid? editingFixtureId;
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+        fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>("api/fixtures") ?? [];
+    }
+
+    void StartEdit(FixtureDto fixture)
+    {
+        editingFixtureId = fixture.Id;
+        roomId = fixture.RoomId.ToString();
+        fixtureName = fixture.Name;
+        fixtureType = fixture.Type;
+        fixtureManufacturer = fixture.Manufacturer ?? "";
+        fixtureModel = fixture.Model ?? "";
+        fixtureSerialNumber = fixture.SerialNumber ?? "";
+        fixturePurchaseDate = fixture.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        fixturePurchasePrice = fixture.PurchasePrice?.ToString() ?? "";
+        fixtureCurrentValue = fixture.CurrentValue?.ToString() ?? "";
+        fixtureWarranty = fixture.Warranty ?? "";
+        fixtureManualUrl = fixture.ManualUrl ?? "";
+        fixtureInstallerName = fixture.InstallerName ?? "";
+        fixtureInstallationDate = fixture.InstallationDate?.ToString("yyyy-MM-dd") ?? "";
+        fixtureMaintenanceSchedule = fixture.MaintenanceSchedule ?? "";
+        fixtureLastMaintenanceDate = fixture.LastMaintenanceDate?.ToString("yyyy-MM-dd") ?? "";
+        fixtureCondition = fixture.Condition ?? "";
+        fixtureNotes = fixture.Notes ?? "";
+    }
+
+    void CancelEdit()
+    {
+        editingFixtureId = null;
+        ClearForm();
+    }
+
+    void ClearForm()
+    {
+        roomId = fixtureName = fixtureType = fixtureManufacturer = fixtureModel = fixtureSerialNumber = "";
+        fixturePurchaseDate = fixturePurchasePrice = fixtureCurrentValue = fixtureWarranty = fixtureManualUrl = "";
+        fixtureInstallerName = fixtureInstallationDate = fixtureMaintenanceSchedule = fixtureLastMaintenanceDate = fixtureCondition = fixtureNotes = "";
+    }
+
+    async Task SaveFixture()
+    {
+        error = null;
+        if (!Guid.TryParse(roomId, out var parsedRoomId)) { error = "Choose a room first."; return; }
+        if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(fixtureType)) { error = "Fixture name and type are required."; return; }
+
+        var response = editingFixtureId is null
+            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes))
+            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes));
+
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        editingFixtureId = null;
+        ClearForm();
+        fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>("api/fixtures") ?? [];
+    }
+
+    async Task DeleteFixture(Guid fixtureId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/fixtures/{fixtureId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>("api/fixtures") ?? [];
+    }
+
+    async Task LoadPhotos()
+    {
+        photos = [];
+        if (!Guid.TryParse(photoFixtureId, out var fixtureId)) return;
+        photos = await Http.GetFromJsonAsync<List<FixturePhotoDto>>($"api/fixtures/{fixtureId}/photos") ?? [];
+    }
+
+    async Task AddPhoto()
+    {
+        error = null;
+        if (!Guid.TryParse(photoFixtureId, out var fixtureId)) { error = "Choose a fixture first."; return; }
+        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Provide a storage key for the photo."; return; }
+        var response = await Http.PostAsJsonAsync($"api/fixtures/{fixtureId}/photos", new FixturePhotoInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        photoStorageKey = photoCaption = "";
+        photoSortOrder = "0";
+        await LoadPhotos();
+    }
+
+    async Task DeletePhoto(Guid photoId)
+    {
+        error = null;
+        if (!Guid.TryParse(photoFixtureId, out var fixtureId)) { error = "Choose a fixture first."; return; }
+        var response = await Http.DeleteAsync($"api/fixtures/{fixtureId}/photos/{photoId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadPhotos();
+    }
+
+    string? GetPropertyCurrency(FixtureDto fixture)
+    {
+        var room = rooms.FirstOrDefault(r => r.Id == fixture.RoomId);
+        if (room is null) return "USD";
+        var floor = floors.FirstOrDefault(f => f.Id == room.FloorId);
+        if (floor is null) return "USD";
+        var property = properties.FirstOrDefault(p => p.Id == floor.PropertyId);
+        return property?.Currency ?? "USD";
+    }
+
+    static DateTime? TryDate(string? value) => DateTime.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
+    static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
+}

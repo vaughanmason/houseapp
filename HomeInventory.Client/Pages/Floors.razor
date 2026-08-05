@@ -1,0 +1,99 @@
+@page "/floors"
+@inject HttpClient Http
+
+<PageTitle>Floors</PageTitle>
+
+<div class="mb-4">
+    <h1>Floors</h1>
+    <p class="lead">Manage floors for your properties.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">Add floor</h2>
+            <select class="form-select mb-2" @bind="propertyId">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            <input class="form-control mb-2" @bind="floorName" placeholder="Floor name (e.g., Ground Floor, Level 1)" />
+            <textarea class="form-control mb-2" @bind="floorNotes" placeholder="Notes"></textarea>
+            <button class="btn btn-primary" @onclick="AddFloor">Add floor</button>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <h2 class="h4">Floors by property</h2>
+        @if (properties.Count == 0)
+        {
+            <div class="alert alert-info">No properties found. <a href="properties">Create a property first</a>.</div>
+        }
+        else if (floors.Count == 0)
+        {
+            <div class="alert alert-info">No floors yet. Add one to the left.</div>
+        }
+        else
+        {
+            @foreach (var prop in properties.Where(p => floors.Any(f => f.PropertyId == p.Id)))
+            {
+                <div class="mb-3">
+                    <h5>@prop.Name</h5>
+                    <ul class="list-group">
+                        @foreach (var floor in floors.Where(f => f.PropertyId == prop.Id).OrderBy(f => f.Name))
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong>@floor.Name</strong>
+                                    @if (!string.IsNullOrEmpty(floor.Notes))
+                                    {
+                                        <div class="small text-muted">@floor.Notes</div>
+                                    }
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFloor(floor.Id)">Delete</button>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    List<PropertyDto> properties = [];
+    List<FloorDto> floors = [];
+
+    string propertyId = "", floorName = "", floorNotes = "";
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
+    }
+
+    async Task AddFloor()
+    {
+        error = null;
+        if (!Guid.TryParse(propertyId, out var propId)) { error = "Choose a property first."; return; }
+        if (string.IsNullOrWhiteSpace(floorName)) { error = "Floor name is required."; return; }
+
+        var response = await Http.PostAsJsonAsync($"api/properties/{propId}/floors", new FloorInput(propId, floorName, floorNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        floorName = floorNotes = "";
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
+    }
+
+    async Task DeleteFloor(Guid floorId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/floors/{floorId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
+    }
+}

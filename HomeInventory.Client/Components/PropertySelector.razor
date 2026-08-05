@@ -1,0 +1,39 @@
+@if (Properties.Count == 0)
+{
+    <div class="alert alert-info">No properties found.</div>
+}
+else
+{
+    <div class="mb-3">
+        <select class="form-select" @onchange="OnPropertySelected" value="@SelectedPropertyId?.ToString() ?? ''">
+            <option value="">-- Select a property --</option>
+            @foreach (var p in Properties)
+            {
+                <option value="@p.Id">@p.Name @(string.IsNullOrEmpty(p.Address) ? "" : $"({p.Address})")</option>
+            }
+        </select>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public List<PropertyDto> Properties { get; set; } = new();
+
+    [Parameter]
+    public Guid? SelectedPropertyId { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid?> SelectedPropertyIdChanged { get; set; }
+
+    private async Task OnPropertySelected(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var id))
+        {
+            await SelectedPropertyIdChanged.InvokeAsync(id);
+        }
+        else
+        {
+            await SelectedPropertyIdChanged.InvokeAsync(null);
+        }
+    }
+}

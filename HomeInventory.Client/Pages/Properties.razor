@@ -1,13 +1,18 @@
 @page "/properties"
 @inject HttpClient Http
+@using System.Globalization
 
-<PageTitle>Properties & rooms</PageTitle>
-<h1>Properties & rooms</h1>
+<PageTitle>Properties</PageTitle>
+
+<div class="mb-4">
+    <h1>Properties</h1>
+    <p class="lead">Manage your properties and property-level information.</p>
+</div>
 
 <div class="row g-4">
     <div class="col-lg-5">
         <div class="card card-body">
-            <h2 class="h4">Add property</h2>
+            <h2 class="h4">@(editingPropertyId is null ? "Add property" : "Edit property")</h2>
             <input class="form-control mb-2" @bind="propertyName" placeholder="Property name" />
             <input class="form-control mb-2" @bind="propertyAddress" placeholder="Address (optional)" />
             <div class="row g-2 mb-2">
@@ -25,475 +30,95 @@
                 <option value="JPY">JPY</option>
             </select>
             <textarea class="form-control mb-2" @bind="propertyNotes" placeholder="Notes"></textarea>
-            <button class="btn btn-primary" @onclick="AddProperty">Save property</button>
+            <button class="btn btn-primary" @onclick="SaveProperty">@(editingPropertyId is null ? "Add property" : "Update property")</button>
+            @if (editingPropertyId is not null)
+            {
+                <button class="btn btn-outline-secondary ms-2" @onclick="CancelEdit">Cancel</button>
+            }
         </div>
     </div>
+
     <div class="col-lg-7">
         <h2 class="h4">Your properties</h2>
-        <ul class="list-group">
-            @foreach (var p in properties)
-            {
-                <li class="list-group-item">
-                    @if (editingPropertyId == p.Id)
-                    {
-                        <input class="form-control mb-2" @bind="editPropertyName" />
-                        <input class="form-control mb-2" @bind="editPropertyAddress" />
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-6"><input class="form-control" @bind="editPropertyPurchaseDate" placeholder="YYYY-MM-DD" /></div>
-                            <div class="col-md-6"><input class="form-control" @bind="editPropertyPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
-                        </div>
-                        <input class="form-control mb-2" @bind="editPropertyFloorArea" type="number" step="0.01" placeholder="Floor area" />
-                        <select class="form-select mb-2" @bind="editPropertyCurrency">
-                            <option value="ZAR">ZAR</option>
-                            <option value="USD">USD</option>
-                            <option value="EUR">EUR</option>
-                            <option value="GBP">GBP</option>
-                            <option value="CAD">CAD</option>
-                            <option value="AUD">AUD</option>
-                            <option value="JPY">JPY</option>
-                        </select>
-                        <textarea class="form-control mb-2" @bind="editPropertyNotes"></textarea>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-success btn-sm" @onclick="() => SavePropertyEdit(p.Id)">Save</button>
-                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelPropertyEdit">Cancel</button>
-                        </div>
-                    }
-                    else
-                    {
+        @if (properties.Count == 0)
+        {
+            <div class="alert alert-info">No properties yet. Add your first one to the left.</div>
+        }
+        else
+        {
+            <ul class="list-group">
+                @foreach (var p in properties)
+                {
+                    <li class="list-group-item">
                         <strong>@p.Name</strong>
                         <div class="text-muted">@p.Address</div>
-                        <div class="small text-muted">Purchased: @FormatDate(p.PurchaseDate) · Price: @FormatMoney(p.PurchasePrice, p.Currency) · Floor area: @FormatNumber(p.FloorArea)</div>
+                        <div class="small text-muted">
+                            Purchased: @FormatDate(p.PurchaseDate) · 
+                            Price: <CurrencyDisplay Value="p.PurchasePrice" CurrencyCode="p.Currency" /> · 
+                            Floor area: @FormatNumber(p.FloorArea) · 
+                            Currency: @p.Currency
+                        </div>
                         <div class="small mb-2">@p.Notes</div>
-                        <button class="btn btn-outline-primary btn-sm" @onclick="() => StartPropertyEdit(p)">Edit</button>
-                    }
-                </li>
-            }
-        </ul>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => StartEdit(p)">Edit</button>
+                    </li>
+                }
+            </ul>
+        }
     </div>
 </div>
 
-<div class="row g-4 mt-2">
+<hr class="my-4" />
+
+<div class="row g-4">
     <div class="col-12">
         <div class="card card-body">
             <h2 class="h4">Property photos</h2>
-            <select class="form-select mb-2" @bind="propertyPhotoPropertyId" @bind:after="LoadPropertyPhotos">
+            <select class="form-select mb-2" @bind="photoPropertyId" @bind:after="LoadPhotos">
                 <option value="">Choose property</option>
                 @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
             </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="propertyPhotoStorageKey" placeholder="Storage key" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="propertyPhotoCaption" placeholder="Caption" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="propertyPhotoSortOrder" type="number" placeholder="Sort order" />
-            <button class="btn btn-outline-primary mb-3" @onclick="AddPropertyPhoto">Add photo</button>
-            <ul class="list-group">
-                @foreach (var photo in propertyPhotos)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePropertyPhoto(photo.Id)">Delete</button>
-                    </li>
-                }
-            </ul>
-        </div>
-    </div>
-</div>
-
-<hr class="my-4" />
-
-<div class="row g-4">
-    <div class="col-lg-5">
-        <div class="card card-body">
-            <h2 class="h4">Add floor</h2>
-            <select class="form-select mb-2" @bind="floorPropertyId">
-                <option value="">Choose property</option>
-                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
-            </select>
-            <input class="form-control mb-2" @bind="floorName" placeholder="Floor name" />
-            <textarea class="form-control mb-2" @bind="floorNotes" placeholder="Notes"></textarea>
-            <button class="btn btn-outline-primary" @onclick="AddFloor">Save floor</button>
-        </div>
-        <div class="card card-body mt-3">
-            <h2 class="h4">Add room</h2>
-            <select class="form-select mb-2" @bind="roomFloorId">
-                <option value="">Choose floor</option>
-                @foreach (var floor in floors) { <option value="@floor.Id">@GetFloorLabel(floor)</option> }
-            </select>
-            <input class="form-control mb-2" @bind="roomName" placeholder="Room name" />
-            <input class="form-control mb-2" @bind="roomType" placeholder="Type (e.g. Bedroom)" />
-            <div class="row g-2 mb-2">
-                <div class="col-md-4"><input class="form-control" @bind="roomLength" type="number" step="0.01" placeholder="Length" /></div>
-                <div class="col-md-4"><input class="form-control" @bind="roomWidth" type="number" step="0.01" placeholder="Width" /></div>
-                <div class="col-md-4"><input class="form-control" @bind="roomHeight" type="number" step="0.01" placeholder="Height" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-4"><input class="form-control" @bind="roomArea" type="number" step="0.01" placeholder="Area" /></div>
-                <div class="col-md-4"><input class="form-control" @bind="roomVolume" type="number" step="0.01" placeholder="Volume" /></div>
-                <div class="col-md-4"><input class="form-control" @bind="roomCeilingHeight" type="number" step="0.01" placeholder="Ceiling height" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="roomFlooring" placeholder="Flooring" />
-            <input class="form-control mb-2" @bind="roomWallFinish" placeholder="Wall finish" />
-            <input class="form-control mb-2" @bind="roomCeilingFinish" placeholder="Ceiling finish" />
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="roomWindowsCount" type="number" placeholder="Windows count" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="roomDoorsCount" type="number" placeholder="Doors count" /></div>
-            </div>
-            <textarea class="form-control mb-2" @bind="roomFixturesNotes" placeholder="Fixtures notes"></textarea>
-            <textarea class="form-control mb-2" @bind="roomUtilitiesNotes" placeholder="Utilities notes"></textarea>
-            <textarea class="form-control mb-2" @bind="roomNotes" placeholder="Notes"></textarea>
-            <button class="btn btn-primary" @onclick="AddRoom">Save room</button>
-        </div>
-    </div>
-    <div class="col-lg-7">
-        <h2 class="h4">Rooms</h2>
-        <ul class="list-group">
-            @foreach (var r in rooms)
+            @if (!string.IsNullOrEmpty(photoPropertyId))
             {
-                <li class="list-group-item">
-                    @if (editingRoomId == r.Id)
-                    {
-                        <select class="form-select mb-2" @bind="editRoomFloorId">
-                            <option value="">Choose floor</option>
-                            @foreach (var floor in floors) { <option value="@floor.Id">@GetFloorLabel(floor)</option> }
-                        </select>
-                        <input class="form-control mb-2" @bind="editRoomName" />
-                        <input class="form-control mb-2" @bind="editRoomType" />
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-4"><input class="form-control" @bind="editRoomLength" type="number" step="0.01" placeholder="Length" /></div>
-                            <div class="col-md-4"><input class="form-control" @bind="editRoomWidth" type="number" step="0.01" placeholder="Width" /></div>
-                            <div class="col-md-4"><input class="form-control" @bind="editRoomHeight" type="number" step="0.01" placeholder="Height" /></div>
-                        </div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-4"><input class="form-control" @bind="editRoomArea" type="number" step="0.01" placeholder="Area" /></div>
-                            <div class="col-md-4"><input class="form-control" @bind="editRoomVolume" type="number" step="0.01" placeholder="Volume" /></div>
-                            <div class="col-md-4"><input class="form-control" @bind="editRoomCeilingHeight" type="number" step="0.01" placeholder="Ceiling height" /></div>
-                        </div>
-                        <input class="form-control mb-2" @bind="editRoomFlooring" placeholder="Flooring" />
-                        <input class="form-control mb-2" @bind="editRoomWallFinish" placeholder="Wall finish" />
-                        <input class="form-control mb-2" @bind="editRoomCeilingFinish" placeholder="Ceiling finish" />
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-6"><input class="form-control" @bind="editRoomWindowsCount" type="number" placeholder="Windows count" /></div>
-                            <div class="col-md-6"><input class="form-control" @bind="editRoomDoorsCount" type="number" placeholder="Doors count" /></div>
-                        </div>
-                        <textarea class="form-control mb-2" @bind="editRoomFixturesNotes"></textarea>
-                        <textarea class="form-control mb-2" @bind="editRoomUtilitiesNotes"></textarea>
-                        <textarea class="form-control mb-2" @bind="editRoomNotes"></textarea>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-success btn-sm" @onclick="() => SaveRoomEdit(r.Id)">Save</button>
-                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelRoomEdit">Cancel</button>
-                        </div>
-                    }
-                    else
-                    {
-                        <strong>@r.Name</strong> <span class="text-muted">@r.Type</span>
-                        <div class="small text-muted">Area: @FormatNumber(r.Area) · Volume: @FormatNumber(r.Volume) · Ceiling: @FormatNumber(r.CeilingHeight)</div>
-                        <div class="small text-muted mb-2">Flooring: @r.Flooring · Wall: @r.WallFinish · Ceiling: @r.CeilingFinish</div>
-                        <div class="small text-muted">Floor: @GetFloorLabel(r.FloorId)</div>
-                        <button class="btn btn-outline-primary btn-sm" @onclick="() => StartRoomEdit(r)">Edit</button>
-                    }
-                </li>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key" /></div>
+                    <div class="col-md-6"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
+                </div>
+                <input class="form-control mb-2" @bind="photoSortOrder" type="number" placeholder="Sort order" />
+                <button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button>
+                @if (photos.Count > 0)
+                {
+                    <ul class="list-group">
+                        @foreach (var photo in photos)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
+                            </li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <div class="alert alert-info">No photos yet.</div>
+                }
             }
-        </ul>
-    </div>
-</div>
-
-<hr class="my-4" />
-
-<div class="row g-4">
-    <div class="col-12">
-        <div class="card card-body">
-            <h2 class="h4">Surfaces</h2>
-            <select class="form-select mb-2" @bind="surfaceRoomId" @bind:after="LoadSurfaces">
-                <option value="">Choose room</option>
-                @foreach (var room in rooms) { <option value="@room.Id">@room.Name</option> }
-            </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="surfaceName" placeholder="Surface name" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="surfaceType" placeholder="Type (wall, ceiling, flooring, trim)" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="surfaceSortOrder" type="number" placeholder="Sort order" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="surfaceNotes" placeholder="Notes" /></div>
-            </div>
-            <button class="btn btn-outline-primary mb-3" @onclick="AddSurface">Add surface</button>
-            <ul class="list-group">
-                @foreach (var surface in surfaces)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@surface.Name</strong> <span class="text-muted">@surface.SurfaceType</span></span>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurface(surface.Id)">Delete</button>
-                    </li>
-                }
-            </ul>
-        </div>
-    </div>
-</div>
-
-<hr class="my-4" />
-
-<div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card card-body">
-            <h2 class="h4">Fixtures</h2>
-            <select class="form-select mb-2" @bind="fixtureRoomId" @bind:after="LoadFixtures">
-                <option value="">Choose room</option>
-                @foreach (var room in rooms) { <option value="@room.Id">@room.Name</option> }
-            </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixtureName" placeholder="Fixture name" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixtureType" placeholder="Fixture type" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixtureManufacturer" placeholder="Manufacturer" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixtureModel" placeholder="Model" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixtureSerialNumber" placeholder="Serial number" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixturePurchaseDate" placeholder="Purchase date" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixturePurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixtureCurrentValue" type="number" step="0.01" placeholder="Current value" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixtureWarranty" placeholder="Warranty" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixtureManualUrl" placeholder="Manual URL" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixtureInstallerName" placeholder="Installer" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixtureInstallationDate" placeholder="Installation date" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="fixtureMaintenanceSchedule" placeholder="Maintenance schedule" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="fixtureLastMaintenanceDate" placeholder="Last maintenance" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="fixtureCondition" placeholder="Condition" />
-            <textarea class="form-control mb-2" @bind="fixtureNotes" placeholder="Notes"></textarea>
-            <button class="btn btn-outline-primary mb-3" @onclick="SaveFixture">@((editingFixtureId is null) ? "Add fixture" : "Update fixture")</button>
-            @if (editingFixtureId is not null)
-            {
-                <button class="btn btn-outline-secondary mb-3 ms-2" @onclick="CancelFixtureEdit">Cancel</button>
-            }
-            <ul class="list-group">
-                @foreach (var fixture in fixtures)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-start">
-                        <span><strong>@fixture.Name</strong> <span class="text-muted">@fixture.Type</span><br /><span class="small text-muted">@fixture.Manufacturer @fixture.Model</span><br /><span class="small text-muted">Purchase: @FormatMoney(fixture.PurchasePrice, GetPropertyCurrencyForFixture(fixture)) · Current: @FormatMoney(fixture.CurrentValue, GetPropertyCurrencyForFixture(fixture))</span></span>
-                        <span>
-                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartFixtureEdit(fixture)">Edit</button>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFixture(fixture.Id)">Delete</button>
-                        </span>
-                    </li>
-                }
-            </ul>
-        </div>
-        <div class="card card-body mt-3">
-            <h2 class="h4">Fixture photos</h2>
-            <select class="form-select mb-2" @bind="fixturePhotoFixtureId" @bind:after="LoadFixturePhotos">
-                <option value="">Choose fixture</option>
-                @foreach (var fixture in fixtures) { <option value="@fixture.Id">@fixture.Name</option> }
-            </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-7"><input class="form-control" @bind="fixturePhotoStorageKey" placeholder="Storage key" /></div>
-                <div class="col-md-5"><input class="form-control" @bind="fixturePhotoCaption" placeholder="Caption" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="fixturePhotoSortOrder" type="number" placeholder="Sort order" />
-            <button class="btn btn-outline-primary mb-3" @onclick="AddFixturePhoto">Add photo</button>
-            <ul class="list-group">
-                @foreach (var photo in fixturePhotos)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFixturePhoto(photo.Id)">Delete</button>
-                    </li>
-                }
-            </ul>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card card-body">
-            <h2 class="h4">Assets</h2>
-            <select class="form-select mb-2" @bind="assetPropertyId" @bind:after="LoadAssets">
-                <option value="">Choose property</option>
-                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
-            </select>
-            <select class="form-select mb-2" @bind="assetRoomId">
-                <option value="">Choose room</option>
-                @foreach (var room in RoomsForProperty(Guid.TryParse(assetPropertyId, out var propertyId) ? propertyId : (Guid?)null)) { <option value="@room.Id">@room.Name</option> }
-            </select>
-            <select class="form-select mb-2" @bind="assetStorageLocationId">
-                <option value="">Choose storage location</option>
-                @foreach (var location in LocationsForProperty(Guid.TryParse(assetPropertyId, out var propertyId) ? propertyId : (Guid?)null)) { <option value="@location.Id">@location.Path</option> }
-            </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="assetName" placeholder="Asset name" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="assetCategory" placeholder="Category" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="assetDescription" placeholder="Description" />
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="assetBrand" placeholder="Brand" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="assetModel" placeholder="Model" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="assetSerialNumber" placeholder="Serial number" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="assetPurchaseDate" placeholder="Purchase date" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="assetPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="assetCurrentValue" type="number" step="0.01" placeholder="Current value" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="assetCondition" placeholder="Condition" />
-            <textarea class="form-control mb-2" @bind="assetNotes" placeholder="Notes"></textarea>
-            <button class="btn btn-outline-primary mb-3" @onclick="SaveAsset">@((editingAssetId is null) ? "Add asset" : "Update asset")</button>
-            @if (editingAssetId is not null)
-            {
-                <button class="btn btn-outline-secondary mb-3 ms-2" @onclick="CancelAssetEdit">Cancel</button>
-            }
-            <ul class="list-group">
-                @foreach (var asset in assets)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-start">
-                        <span><strong>@asset.Name</strong> <span class="text-muted">@asset.Category</span><br /><span class="small text-muted">@asset.LocationPath</span><br /><span class="small text-muted">Purchase: @FormatMoney(asset.PurchasePrice, GetPropertyCurrency(asset.PropertyId)) · Current: @FormatMoney(asset.CurrentValue, GetPropertyCurrency(asset.PropertyId))</span></span>
-                        <span>
-                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartAssetEdit(asset)">Edit</button>
-                            <button class="btn btn-sm btn-outline-warning me-1" @onclick="() => ArchiveAsset(asset.Id)">Archive</button>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsset(asset.Id)">Delete</button>
-                        </span>
-                    </li>
-                }
-            </ul>
-        </div>
-        <div class="card card-body mt-3">
-            <h2 class="h4">Asset photos</h2>
-            <select class="form-select mb-2" @bind="assetPhotoAssetId" @bind:after="LoadAssetPhotos">
-                <option value="">Choose asset</option>
-                @foreach (var asset in assets) { <option value="@asset.Id">@asset.Name</option> }
-            </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-7"><input class="form-control" @bind="assetPhotoStorageKey" placeholder="Storage key" /></div>
-                <div class="col-md-5"><input class="form-control" @bind="assetPhotoCaption" placeholder="Caption" /></div>
-            </div>
-            <input class="form-control mb-2" @bind="assetPhotoSortOrder" type="number" placeholder="Sort order" />
-            <button class="btn btn-outline-primary mb-3" @onclick="AddAssetPhoto">Add photo</button>
-            <ul class="list-group">
-                @foreach (var photo in assetPhotos)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAssetPhoto(photo.Id)">Delete</button>
-                    </li>
-                }
-            </ul>
-        </div>
-    </div>
-</div>
-
-<hr class="my-4" />
-
-<div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card card-body">
-            <h2 class="h4">Paint library</h2>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="paintBrand" placeholder="Brand" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="paintColorName" placeholder="Colour name" /></div>
-            </div>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="paintColorCode" placeholder="Colour code" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="paintFinish" placeholder="Finish" /></div>
-            </div>
-            <textarea class="form-control mb-2" @bind="paintNotes" placeholder="Notes"></textarea>
-            <button class="btn btn-primary mb-3" @onclick="SavePaint">@((editingPaintId is null) ? "Add paint" : "Update paint")</button>
-            @if (editingPaintId is not null)
-            {
-                <button class="btn btn-outline-secondary mb-3 ms-2" @onclick="CancelPaintEdit">Cancel</button>
-            }
-            <ul class="list-group">
-                @foreach (var paint in paints)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@paint.Brand</strong> @paint.ColorName <span class="text-muted">@paint.ColorCode @paint.Finish</span></span>
-                        <span>
-                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartPaintEdit(paint)">Edit</button>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePaint(paint.Id)">Delete</button>
-                        </span>
-                    </li>
-                }
-            </ul>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card card-body">
-            <h2 class="h4">Room paint colours</h2>
-            <select class="form-select mb-2" @bind="roomPaintRoomId" @bind:after="LoadRoomPaints">
-                <option value="">Choose room</option>
-                @foreach (var room in rooms) { <option value="@room.Id">@room.Name</option> }
-            </select>
-            <select class="form-select mb-2" @bind="roomPaintPaintId">
-                <option value="">Choose paint</option>
-                @foreach (var paint in paints) { <option value="@paint.Id">@paint.Brand @paint.ColorName (@paint.ColorCode)</option> }
-            </select>
-            <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="roomPaintSurface" placeholder="Surface (e.g. North wall)" /></div>
-                <div class="col-md-6"><input class="form-control" @bind="roomPaintSortOrder" type="number" placeholder="Sort order" /></div>
-            </div>
-            <button class="btn btn-outline-primary mb-3" @onclick="AddRoomPaint">Assign paint</button>
-            <ul class="list-group">
-                @foreach (var item in roomPaints)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@item.Brand</strong> @item.ColorName <span class="text-muted">@item.ColorCode @item.Finish · @item.Surface</span></span>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveRoomPaint(item.PaintId)">Remove</button>
-                    </li>
-                }
-            </ul>
         </div>
     </div>
 </div>
 
 @if (error is not null)
 {
-    <p class="alert alert-danger mt-3">@error</p>
+    <div class="alert alert-danger mt-3">@error</div>
 }
 
 @code {
     List<PropertyDto> properties = [];
-    List<FloorDto> floors = [];
-    List<RoomDto> rooms = [];
-    List<PaintDto> paints = [];
-    List<RoomPaintDto> roomPaints = [];
-    List<PhotoMetadataDto> propertyPhotos = [];
-    List<SurfaceDto> surfaces = [];
-    List<StorageLocationDto> locations = [];
-    List<FixtureDto> fixtures = [];
-    List<FixturePhotoDto> fixturePhotos = [];
-    List<AssetDto> assets = [];
-    List<AssetPhotoDto> assetPhotos = [];
+    List<PhotoMetadataDto> photos = [];
 
     string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyCurrency = "USD", propertyNotes = "";
-    string propertyPhotoPropertyId = "", propertyPhotoStorageKey = "", propertyPhotoCaption = "", propertyPhotoSortOrder = "0";
-    string floorPropertyId = "", floorName = "", floorNotes = "";
-    string roomFloorId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "", roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "", roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
+    string photoPropertyId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
 
     Guid? editingPropertyId;
-    string editPropertyName = "", editPropertyAddress = "", editPropertyPurchaseDate = "", editPropertyPurchasePrice = "", editPropertyFloorArea = "", editPropertyCurrency = "USD", editPropertyNotes = "";
-
-    Guid? editingRoomId;
-    string editRoomFloorId = "", editRoomName = "", editRoomType = "", editRoomArea = "", editRoomVolume = "", editRoomCeilingHeight = "", editRoomLength = "", editRoomWidth = "", editRoomHeight = "", editRoomFlooring = "", editRoomWallFinish = "", editRoomCeilingFinish = "", editRoomWindowsCount = "", editRoomDoorsCount = "", editRoomFixturesNotes = "", editRoomUtilitiesNotes = "", editRoomNotes = "";
-
-    Guid? editingPaintId;
-    string paintBrand = "", paintColorName = "", paintColorCode = "", paintFinish = "", paintNotes = "";
-
-    string roomPaintRoomId = "", roomPaintPaintId = "", roomPaintSurface = "", roomPaintSortOrder = "0";
-    string surfaceRoomId = "", surfaceName = "", surfaceType = "", surfaceSortOrder = "0", surfaceNotes = "";
-    string fixtureRoomId = "", fixtureName = "", fixtureType = "", fixtureManufacturer = "", fixtureModel = "", fixtureSerialNumber = "", fixturePurchaseDate = "", fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "", fixtureInstallerName = "", fixtureInstallationDate = "", fixtureMaintenanceSchedule = "", fixtureLastMaintenanceDate = "", fixtureCondition = "", fixtureNotes = "";
-    string editFixtureRoomId = "", editFixtureName = "", editFixtureType = "", editFixtureManufacturer = "", editFixtureModel = "", editFixtureSerialNumber = "", editFixturePurchaseDate = "", editFixturePurchasePrice = "", editFixtureCurrentValue = "", editFixtureWarranty = "", editFixtureManualUrl = "", editFixtureInstallerName = "", editFixtureInstallationDate = "", editFixtureMaintenanceSchedule = "", editFixtureLastMaintenanceDate = "", editFixtureCondition = "", editFixtureNotes = "";
-    string fixturePhotoFixtureId = "", fixturePhotoStorageKey = "", fixturePhotoCaption = "", fixturePhotoSortOrder = "0";
-    string assetPropertyId = "", assetRoomId = "", assetStorageLocationId = "", assetName = "", assetCategory = "", assetDescription = "", assetBrand = "", assetModel = "", assetSerialNumber = "", assetPurchaseDate = "", assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "";
-    string editAssetPropertyId = "", editAssetRoomId = "", editAssetStorageLocationId = "", editAssetName = "", editAssetCategory = "", editAssetDescription = "", editAssetBrand = "", editAssetModel = "", editAssetSerialNumber = "", editAssetPurchaseDate = "", editAssetPurchasePrice = "", editAssetCurrentValue = "", editAssetCondition = "", editAssetNotes = "";
-    string assetPhotoAssetId = "", assetPhotoStorageKey = "", assetPhotoCaption = "", assetPhotoSortOrder = "0";
-    Guid? editingFixtureId;
-    Guid? editingAssetId;
     string? error;
 
     protected override async Task OnInitializedAsync() => await Load();
@@ -501,468 +126,85 @@
     async Task Load()
     {
         properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
-        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
-        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
-        paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
-        locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
-        fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>("api/fixtures") ?? [];
-        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
-        if (string.IsNullOrWhiteSpace(propertyPhotoPropertyId) && properties.Count > 0)
-        {
-            propertyPhotoPropertyId = properties[0].Id.ToString();
-        }
-        if (Guid.TryParse(propertyPhotoPropertyId, out var propertyId) && properties.Any(x => x.Id == propertyId))
-        {
-            await LoadPropertyPhotos();
-        }
-        else
-        {
-            propertyPhotoPropertyId = "";
-            propertyPhotos = [];
-        }
-        if (string.IsNullOrWhiteSpace(fixtureRoomId) && rooms.Count > 0)
-        {
-            fixtureRoomId = rooms[0].Id.ToString();
-        }
-        if (Guid.TryParse(fixtureRoomId, out var fixtureRoomIdValue) && rooms.Any(x => x.Id == fixtureRoomIdValue))
-        {
-            await LoadFixtures();
-        }
-        else
-        {
-            fixtureRoomId = "";
-            fixtures = [];
-        }
-        if (string.IsNullOrWhiteSpace(assetPropertyId) && properties.Count > 0)
-        {
-            assetPropertyId = properties[0].Id.ToString();
-        }
-        if (Guid.TryParse(assetPropertyId, out var assetPropertyIdValue) && properties.Any(x => x.Id == assetPropertyIdValue))
-        {
-            await LoadAssets();
-        }
-        else
-        {
-            assetPropertyId = "";
-            assets = [];
-        }
+        photos = [];
     }
 
-    async Task AddProperty()
-    {
-        error = null;
-        var response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        propertyName = propertyAddress = propertyPurchaseDate = propertyPurchasePrice = propertyFloorArea = propertyNotes = "";
-        propertyCurrency = "USD";
-        await Load();
-    }
-
-    async Task AddFloor()
-    {
-        error = null;
-        if (!Guid.TryParse(floorPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
-        var response = await Http.PostAsJsonAsync($"api/properties/{propertyId}/floors", new FloorInput(propertyId, floorName, floorNotes));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        floorName = floorNotes = "";
-        await Load();
-    }
-
-    async Task AddRoom()
-    {
-        error = null;
-        if (!Guid.TryParse(roomFloorId, out var floorId)) { error = "Choose a floor first."; return; }
-        var response = await Http.PostAsJsonAsync("api/rooms", new RoomInput(floorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        roomName = roomType = roomArea = roomVolume = roomCeilingHeight = roomLength = roomWidth = roomHeight = roomFlooring = roomWallFinish = roomCeilingFinish = roomWindowsCount = roomDoorsCount = roomFixturesNotes = roomUtilitiesNotes = roomNotes = "";
-        roomFloorId = "";
-        await Load();
-    }
-
-    void StartPropertyEdit(PropertyDto property)
+    void StartEdit(PropertyDto property)
     {
         editingPropertyId = property.Id;
-        editPropertyName = property.Name;
-        editPropertyAddress = property.Address ?? "";
-        editPropertyPurchaseDate = property.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
-        editPropertyPurchasePrice = property.PurchasePrice?.ToString() ?? "";
-        editPropertyFloorArea = property.FloorArea?.ToString() ?? "";
-        editPropertyCurrency = property.Currency ?? "USD";
-        editPropertyNotes = property.Notes ?? "";
+        propertyName = property.Name;
+        propertyAddress = property.Address ?? "";
+        propertyPurchaseDate = property.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        propertyPurchasePrice = property.PurchasePrice?.ToString() ?? "";
+        propertyFloorArea = property.FloorArea?.ToString() ?? "";
+        propertyCurrency = property.Currency ?? "USD";
+        propertyNotes = property.Notes ?? "";
     }
 
-    void CancelPropertyEdit() => editingPropertyId = null;
+    void CancelEdit()
+    {
+        editingPropertyId = null;
+        ClearForm();
+    }
 
-    async Task SavePropertyEdit(Guid id)
+    void ClearForm()
+    {
+        propertyName = propertyAddress = propertyPurchaseDate = propertyPurchasePrice = propertyFloorArea = propertyNotes = "";
+        propertyCurrency = "USD";
+    }
+
+    async Task SaveProperty()
     {
         error = null;
-        var response = await Http.PutAsJsonAsync($"api/properties/{id}", new PropertyInput(editPropertyName, editPropertyAddress, TryDate(editPropertyPurchaseDate), TryDecimal(editPropertyPurchasePrice), TryDecimal(editPropertyFloorArea), editPropertyNotes, editPropertyCurrency));
+        if (string.IsNullOrWhiteSpace(propertyName)) { error = "Property name is required."; return; }
+
+        HttpResponseMessage response;
+        if (editingPropertyId is null)
+        {
+            response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
+        }
+        else
+        {
+            response = await Http.PutAsJsonAsync($"api/properties/{editingPropertyId}", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
+        }
+
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingPropertyId = null;
+        ClearForm();
         await Load();
     }
 
-    void StartRoomEdit(RoomDto room)
+    async Task LoadPhotos()
     {
-        editingRoomId = room.Id;
-        editRoomFloorId = room.FloorId.ToString();
-        editRoomName = room.Name;
-        editRoomType = room.Type ?? "";
-        editRoomArea = room.Area?.ToString() ?? "";
-        editRoomVolume = room.Volume?.ToString() ?? "";
-        editRoomCeilingHeight = room.CeilingHeight?.ToString() ?? "";
-        editRoomLength = room.Length?.ToString() ?? "";
-        editRoomWidth = room.Width?.ToString() ?? "";
-        editRoomHeight = room.Height?.ToString() ?? "";
-        editRoomFlooring = room.Flooring ?? "";
-        editRoomWallFinish = room.WallFinish ?? "";
-        editRoomCeilingFinish = room.CeilingFinish ?? "";
-        editRoomWindowsCount = room.WindowsCount?.ToString() ?? "";
-        editRoomDoorsCount = room.DoorsCount?.ToString() ?? "";
-        editRoomFixturesNotes = room.FixturesNotes ?? "";
-        editRoomUtilitiesNotes = room.UtilitiesNotes ?? "";
-        editRoomNotes = room.Notes ?? "";
+        photos = [];
+        if (!Guid.TryParse(photoPropertyId, out var propertyId)) return;
+        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/properties/{propertyId}/photos") ?? [];
     }
 
-    void CancelRoomEdit() => editingRoomId = null;
-
-    async Task SaveRoomEdit(Guid id)
+    async Task AddPhoto()
     {
         error = null;
-        if (!Guid.TryParse(editRoomFloorId, out var floorId)) { error = "Choose a valid floor for the room."; return; }
-        var response = await Http.PutAsJsonAsync($"api/rooms/{id}", new RoomInput(floorId, editRoomName, editRoomType, TryDecimal(editRoomArea), TryDecimal(editRoomVolume), TryDecimal(editRoomCeilingHeight), TryDecimal(editRoomLength), TryDecimal(editRoomWidth), TryDecimal(editRoomHeight), editRoomFlooring, editRoomWallFinish, editRoomCeilingFinish, null, TryInt(editRoomWindowsCount), TryInt(editRoomDoorsCount), editRoomFixturesNotes, editRoomUtilitiesNotes, editRoomNotes));
+        if (!Guid.TryParse(photoPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Provide a storage key for the photo."; return; }
+        var response = await Http.PostAsJsonAsync($"api/properties/{propertyId}/photos", new PhotoMetadataInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        editingRoomId = null;
-        await Load();
+        photoStorageKey = photoCaption = "";
+        photoSortOrder = "0";
+        await LoadPhotos();
     }
 
-    void StartPaintEdit(PaintDto paint)
-    {
-        editingPaintId = paint.Id;
-        paintBrand = paint.Brand;
-        paintColorName = paint.ColorName;
-        paintColorCode = paint.ColorCode ?? "";
-        paintFinish = paint.Finish ?? "";
-        paintNotes = paint.Notes ?? "";
-    }
-
-    void CancelPaintEdit()
-    {
-        editingPaintId = null;
-        paintBrand = paintColorName = paintColorCode = paintFinish = paintNotes = "";
-    }
-
-    async Task SavePaint()
+    async Task DeletePhoto(Guid photoId)
     {
         error = null;
-        HttpResponseMessage response;
-        if (editingPaintId is null)
-            response = await Http.PostAsJsonAsync("api/paints", new PaintInput(paintBrand, paintColorName, paintColorCode, paintFinish, paintNotes));
-        else
-            response = await Http.PutAsJsonAsync($"api/paints/{editingPaintId}", new PaintInput(paintBrand, paintColorName, paintColorCode, paintFinish, paintNotes));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        CancelPaintEdit();
-        await Load();
-        await LoadRoomPaints();
-    }
-
-    async Task DeletePaint(Guid paintId)
-    {
-        error = null;
-        var response = await Http.DeleteAsync($"api/paints/{paintId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await Load();
-        await LoadRoomPaints();
-    }
-
-    async Task LoadRoomPaints()
-    {
-        roomPaints = [];
-        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) return;
-        roomPaints = await Http.GetFromJsonAsync<List<RoomPaintDto>>($"api/rooms/{roomId}/paints") ?? [];
-    }
-
-    async Task AddRoomPaint()
-    {
-        error = null;
-        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) { error = "Choose a room first."; return; }
-        if (!Guid.TryParse(roomPaintPaintId, out var paintId)) { error = "Choose a paint first."; return; }
-        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/paints", new RoomPaintInput(paintId, TryInt(roomPaintSortOrder) ?? 0, roomPaintSurface));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        roomPaintPaintId = roomPaintSurface = ""; roomPaintSortOrder = "0";
-        await LoadRoomPaints();
-    }
-
-    async Task RemoveRoomPaint(Guid paintId)
-    {
-        error = null;
-        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) { error = "Choose a room first."; return; }
-        var response = await Http.DeleteAsync($"api/rooms/{roomId}/paints/{paintId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadRoomPaints();
-    }
-
-    async Task LoadPropertyPhotos()
-    {
-        propertyPhotos = [];
-        if (!Guid.TryParse(propertyPhotoPropertyId, out var propertyId)) return;
-        propertyPhotos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/properties/{propertyId}/photos") ?? [];
-    }
-
-    async Task AddPropertyPhoto()
-    {
-        error = null;
-        if (!Guid.TryParse(propertyPhotoPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
-        if (string.IsNullOrWhiteSpace(propertyPhotoStorageKey)) { error = "Provide a storage key for the photo."; return; }
-        var response = await Http.PostAsJsonAsync($"api/properties/{propertyId}/photos", new PhotoMetadataInput(propertyPhotoStorageKey, propertyPhotoCaption, TryInt(propertyPhotoSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        propertyPhotoStorageKey = propertyPhotoCaption = "";
-        propertyPhotoSortOrder = "0";
-        await LoadPropertyPhotos();
-    }
-
-    async Task DeletePropertyPhoto(Guid photoId)
-    {
-        error = null;
-        if (!Guid.TryParse(propertyPhotoPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        if (!Guid.TryParse(photoPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
         var response = await Http.DeleteAsync($"api/properties/{propertyId}/photos/{photoId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadPropertyPhotos();
+        await LoadPhotos();
     }
 
-    async Task LoadSurfaces()
-    {
-        surfaces = [];
-        if (!Guid.TryParse(surfaceRoomId, out var roomId)) return;
-        surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
-    }
-
-    async Task AddSurface()
-    {
-        error = null;
-        if (!Guid.TryParse(surfaceRoomId, out var roomId)) { error = "Choose a room first."; return; }
-        if (string.IsNullOrWhiteSpace(surfaceName)) { error = "Surface name is required."; return; }
-        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/surfaces", new SurfaceInput(roomId, surfaceName, string.IsNullOrWhiteSpace(surfaceType) ? "wall" : surfaceType, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, surfaceNotes, TryInt(surfaceSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        surfaceName = surfaceType = "";
-        surfaceSortOrder = "0";
-        surfaceNotes = "";
-        await LoadSurfaces();
-    }
-
-    async Task DeleteSurface(Guid surfaceId)
-    {
-        error = null;
-        if (!Guid.TryParse(surfaceRoomId, out var roomId)) { error = "Choose a room first."; return; }
-        var response = await Http.DeleteAsync($"api/surfaces/{surfaceId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadSurfaces();
-    }
-
-    async Task LoadFixtures()
-    {
-        fixtures = [];
-        if (!Guid.TryParse(fixtureRoomId, out var roomId)) return;
-        fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>($"api/rooms/{roomId}/fixtures") ?? [];
-    }
-
-    async Task LoadFixturePhotos()
-    {
-        fixturePhotos = [];
-        if (!Guid.TryParse(fixturePhotoFixtureId, out var fixtureId)) return;
-        fixturePhotos = await Http.GetFromJsonAsync<List<FixturePhotoDto>>($"api/fixtures/{fixtureId}/photos") ?? [];
-    }
-
-    async Task SaveFixture()
-    {
-        error = null;
-        if (!Guid.TryParse(fixtureRoomId, out var roomId)) { error = "Choose a room first."; return; }
-        if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(fixtureType)) { error = "Fixture name and type are required."; return; }
-        var response = editingFixtureId is null
-            ? await Http.PostAsJsonAsync($"api/rooms/{roomId}/fixtures", new FixtureInput(roomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDate(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDate(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDate(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes))
-            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(roomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDate(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDate(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDate(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        CancelFixtureEdit();
-        await LoadFixtures();
-    }
-
-    void StartFixtureEdit(FixtureDto fixture)
-    {
-        editingFixtureId = fixture.Id;
-        fixtureRoomId = fixture.RoomId.ToString();
-        fixtureName = fixture.Name;
-        fixtureType = fixture.Type;
-        fixtureManufacturer = fixture.Manufacturer ?? "";
-        fixtureModel = fixture.Model ?? "";
-        fixtureSerialNumber = fixture.SerialNumber ?? "";
-        fixturePurchaseDate = fixture.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
-        fixturePurchasePrice = fixture.PurchasePrice?.ToString() ?? "";
-        fixtureCurrentValue = fixture.CurrentValue?.ToString() ?? "";
-        fixtureWarranty = fixture.Warranty ?? "";
-        fixtureManualUrl = fixture.ManualUrl ?? "";
-        fixtureInstallerName = fixture.InstallerName ?? "";
-        fixtureInstallationDate = fixture.InstallationDate?.ToString("yyyy-MM-dd") ?? "";
-        fixtureMaintenanceSchedule = fixture.MaintenanceSchedule ?? "";
-        fixtureLastMaintenanceDate = fixture.LastMaintenanceDate?.ToString("yyyy-MM-dd") ?? "";
-        fixtureCondition = fixture.Condition ?? "";
-        fixtureNotes = fixture.Notes ?? "";
-    }
-
-    void CancelFixtureEdit()
-    {
-        editingFixtureId = null;
-        fixtureRoomId = "";
-        fixtureName = fixtureType = fixtureManufacturer = fixtureModel = fixtureSerialNumber = fixturePurchaseDate = fixturePurchasePrice = fixtureCurrentValue = fixtureWarranty = fixtureManualUrl = fixtureInstallerName = fixtureInstallationDate = fixtureMaintenanceSchedule = fixtureLastMaintenanceDate = fixtureCondition = fixtureNotes = "";
-    }
-
-    async Task DeleteFixture(Guid fixtureId)
-    {
-        error = null;
-        var response = await Http.DeleteAsync($"api/fixtures/{fixtureId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadFixtures();
-    }
-
-    async Task AddFixturePhoto()
-    {
-        error = null;
-        if (!Guid.TryParse(fixturePhotoFixtureId, out var fixtureId)) { error = "Choose a fixture first."; return; }
-        if (string.IsNullOrWhiteSpace(fixturePhotoStorageKey)) { error = "Provide a storage key for the photo."; return; }
-        var response = await Http.PostAsJsonAsync($"api/fixtures/{fixtureId}/photos", new FixturePhotoInput(fixturePhotoStorageKey, fixturePhotoCaption, TryInt(fixturePhotoSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        fixturePhotoStorageKey = fixturePhotoCaption = "";
-        fixturePhotoSortOrder = "0";
-        await LoadFixturePhotos();
-    }
-
-    async Task DeleteFixturePhoto(Guid photoId)
-    {
-        error = null;
-        if (!Guid.TryParse(fixturePhotoFixtureId, out var fixtureId)) { error = "Choose a fixture first."; return; }
-        var response = await Http.DeleteAsync($"api/fixtures/{fixtureId}/photos/{photoId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadFixturePhotos();
-    }
-
-    async Task LoadAssets()
-    {
-        assets = [];
-        if (!Guid.TryParse(assetPropertyId, out var propertyId)) return;
-        assets = await Http.GetFromJsonAsync<List<AssetDto>>($"api/assets?propertyId={propertyId}&archived=false") ?? [];
-    }
-
-    async Task LoadAssetPhotos()
-    {
-        assetPhotos = [];
-        if (!Guid.TryParse(assetPhotoAssetId, out var assetId)) return;
-        assetPhotos = await Http.GetFromJsonAsync<List<AssetPhotoDto>>($"api/assets/{assetId}/photos") ?? [];
-    }
-
-    async Task SaveAsset()
-    {
-        error = null;
-        if (!Guid.TryParse(assetPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
-        if (string.IsNullOrWhiteSpace(assetName) || string.IsNullOrWhiteSpace(assetCategory)) { error = "Asset name and category are required."; return; }
-        var response = editingAssetId is null
-            ? await Http.PostAsJsonAsync("api/assets", new AssetInput(propertyId, Guid.TryParse(assetRoomId, out var roomId) ? (Guid?)roomId : null, Guid.TryParse(assetStorageLocationId, out var storageLocationId) ? (Guid?)storageLocationId : null, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDate(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes))
-            : await Http.PutAsJsonAsync($"api/assets/{editingAssetId}", new AssetInput(propertyId, Guid.TryParse(assetRoomId, out var roomId2) ? (Guid?)roomId2 : null, Guid.TryParse(assetStorageLocationId, out var storageLocationId2) ? (Guid?)storageLocationId2 : null, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDate(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        CancelAssetEdit();
-        await LoadAssets();
-    }
-
-    void StartAssetEdit(AssetDto asset)
-    {
-        editingAssetId = asset.Id;
-        assetPropertyId = asset.PropertyId.ToString();
-        assetRoomId = asset.RoomId?.ToString() ?? "";
-        assetStorageLocationId = asset.StorageLocationId?.ToString() ?? "";
-        assetName = asset.Name;
-        assetCategory = asset.Category;
-        assetDescription = asset.Description ?? "";
-        assetBrand = asset.Brand ?? "";
-        assetModel = asset.Model ?? "";
-        assetSerialNumber = asset.SerialNumber ?? "";
-        assetPurchaseDate = asset.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
-        assetPurchasePrice = asset.PurchasePrice?.ToString() ?? "";
-        assetCurrentValue = asset.CurrentValue?.ToString() ?? "";
-        assetCondition = asset.Condition ?? "";
-        assetNotes = asset.Notes ?? "";
-    }
-
-    void CancelAssetEdit()
-    {
-        editingAssetId = null;
-        assetPropertyId = "";
-        assetRoomId = assetStorageLocationId = assetName = assetCategory = assetDescription = assetBrand = assetModel = assetSerialNumber = assetPurchaseDate = assetPurchasePrice = assetCurrentValue = assetCondition = assetNotes = "";
-    }
-
-    async Task DeleteAsset(Guid assetId)
-    {
-        error = null;
-        var response = await Http.DeleteAsync($"api/assets/{assetId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadAssets();
-    }
-
-    async Task ArchiveAsset(Guid assetId)
-    {
-        error = null;
-        var response = await Http.PostAsync($"api/assets/{assetId}/archive", null);
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadAssets();
-    }
-
-    async Task AddAssetPhoto()
-    {
-        error = null;
-        if (!Guid.TryParse(assetPhotoAssetId, out var assetId)) { error = "Choose an asset first."; return; }
-        if (string.IsNullOrWhiteSpace(assetPhotoStorageKey)) { error = "Provide a storage key for the photo."; return; }
-        var response = await Http.PostAsJsonAsync($"api/assets/{assetId}/photos", new AssetPhotoInput(assetPhotoStorageKey, assetPhotoCaption, TryInt(assetPhotoSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        assetPhotoStorageKey = assetPhotoCaption = "";
-        assetPhotoSortOrder = "0";
-        await LoadAssetPhotos();
-    }
-
-    async Task DeleteAssetPhoto(Guid photoId)
-    {
-        error = null;
-        if (!Guid.TryParse(assetPhotoAssetId, out var assetId)) { error = "Choose an asset first."; return; }
-        var response = await Http.DeleteAsync($"api/assets/{assetId}/photos/{photoId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadAssetPhotos();
-    }
-
-    IEnumerable<RoomDto> RoomsForProperty(Guid? propertyId) => rooms.Where(x => propertyId is null || (x.FloorId is Guid floorId && floors.Any(f => f.Id == floorId && f.PropertyId == propertyId.GetValueOrDefault())));
-
-    IEnumerable<StorageLocationDto> LocationsForProperty(Guid? propertyId) => locations.Where(x => propertyId is null || x.PropertyId == propertyId.GetValueOrDefault());
-
-    string GetFloorLabel(FloorDto floor)
-    {
-        var property = properties.FirstOrDefault(x => x.Id == floor.PropertyId);
-        return property is null ? floor.Name : $"{property.Name} · {floor.Name}";
-    }
-
-    string GetFloorLabel(Guid? floorId) => floorId is null ? "-" : (floors.FirstOrDefault(x => x.Id == floorId.Value)?.Name is { Length: > 0 } name ? name : "-");
-
-    static DateOnly? TryDate(string value) => DateOnly.TryParse(value, out var parsed) ? parsed : (DateOnly?)null;
-    static decimal? TryDecimal(string value) => decimal.TryParse(value, out var parsed) ? parsed : (decimal?)null;
-    static int? TryInt(string value) => int.TryParse(value, out var parsed) ? parsed : (int?)null;
-    static string FormatDate(DateOnly? value) => value?.ToString("yyyy-MM-dd") ?? "-";
-    string GetPropertyCurrency(Guid? propertyId) => properties.FirstOrDefault(x => x.Id == propertyId)?.Currency ?? "USD";
-    string GetPropertyCurrencyForFixture(FixtureDto fixture)
-    {
-        var room = rooms.FirstOrDefault(x => x.Id == fixture.RoomId);
-        if (room is null) return "USD";
-        var floor = floors.FirstOrDefault(x => x.Id == room.FloorId);
-        return GetPropertyCurrency(floor?.PropertyId);
-    }
-    static string FormatMoney(decimal? value, string? currencyCode = null)
-    {
-        if (value is null) return "-";
-        var currency = string.IsNullOrWhiteSpace(currencyCode) ? "USD" : currencyCode.Trim().ToUpperInvariant();
-        return $"{currency} {value.Value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
-    }
-    static string FormatNumber(decimal? value) => value?.ToString("0.##") ?? "-";
+    static string FormatDate(DateOnly? date) => date?.ToString("yyyy-MM-dd") ?? "-";
+    static string FormatNumber(decimal? number) => number?.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) ?? "-";
+    static DateOnly? TryDate(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    static decimal? TryDecimal(string? value) => decimal.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var result) ? result : null;
+    static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
 }

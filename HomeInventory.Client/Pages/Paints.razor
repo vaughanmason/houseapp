@@ -1,0 +1,211 @@
+@page "/paints"
+@inject HttpClient Http
+
+<PageTitle>Paint Library</PageTitle>
+
+<div class="mb-4">
+    <h1>Paint Library</h1>
+    <p class="lead">Manage your paint colors and room paint assignments.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">@(editingPaintId is null ? "Add paint" : "Edit paint")</h2>
+            <input class="form-control mb-2" @bind="paintBrand" placeholder="Brand" />
+            <input class="form-control mb-2" @bind="paintColorName" placeholder="Color name" />
+            <input class="form-control mb-2" @bind="paintColorCode" placeholder="Color code (e.g., #FF0000)" />
+            <input class="form-control mb-2" @bind="paintFinish" placeholder="Finish (e.g., Matte, Satin, Glossy)" />
+            <textarea class="form-control mb-2" @bind="paintNotes" placeholder="Notes"></textarea>
+            <button class="btn btn-primary" @onclick="SavePaint">@(editingPaintId is null ? "Add paint" : "Update paint")</button>
+            @if (editingPaintId is not null)
+            {
+                <button class="btn btn-outline-secondary ms-2" @onclick="CancelEdit">Cancel</button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <h2 class="h4">Paint colors</h2>
+        @if (paints.Count == 0)
+        {
+            <div class="alert alert-info">No paints yet. Add one to the left.</div>
+        }
+        else
+        {
+            <ul class="list-group">
+                @foreach (var paint in paints.OrderBy(p => p.Brand).ThenBy(p => p.ColorName))
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>@paint.Brand</strong> @paint.ColorName
+                            <div class="small text-muted">@paint.ColorCode @paint.Finish</div>
+                            @if (!string.IsNullOrEmpty(paint.Notes))
+                            {
+                                <div class="small text-muted">@paint.Notes</div>
+                            }
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(paint)">Edit</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePaint(paint.Id)">Delete</button>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">Assign paint to room</h2>
+            <select class="form-select mb-2" @bind="roomPaintRoomId" @bind:after="LoadRoomPaints">
+                <option value="">Choose room</option>
+                @foreach (var room in rooms.OrderBy(r => r.Name)) { <option value="@room.Id">@room.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(roomPaintRoomId))
+            {
+                <select class="form-select mb-2" @bind="roomPaintPaintId">
+                    <option value="">Choose paint</option>
+                    @foreach (var paint in paints.OrderBy(p => p.Brand)) { <option value="@paint.Id">@paint.Brand @paint.ColorName (@paint.ColorCode)</option> }
+                </select>
+                <input class="form-control mb-2" @bind="roomPaintSurface" placeholder="Surface (e.g., North wall, Ceiling)" />
+                <input class="form-control mb-2" @bind="roomPaintSortOrder" type="number" placeholder="Sort order" />
+                <button class="btn btn-primary" @onclick="AddRoomPaint">Assign paint</button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <h2 class="h4">Room paint assignments</h2>
+        @if (!string.IsNullOrEmpty(roomPaintRoomId))
+        {
+            @if (roomPaints.Count == 0)
+            {
+                <div class="alert alert-info">No paints assigned to this room yet.</div>
+            }
+            else
+            {
+                <ul class="list-group">
+                    @foreach (var item in roomPaints.OrderBy(p => p.SortOrder))
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>@item.Brand</strong> @item.ColorName
+                                <div class="small text-muted">@item.ColorCode @item.Finish</div>
+                                <div class="small text-muted">Surface: @item.Surface</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveRoomPaint(item.PaintId)">Remove</button>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+        else
+        {
+            <div class="alert alert-info">Select a room to view and manage paint assignments.</div>
+        }
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    List<PaintDto> paints = [];
+    List<RoomDto> rooms = [];
+    List<RoomPaintDto> roomPaints = [];
+
+    string paintBrand = "", paintColorName = "", paintColorCode = "", paintFinish = "", paintNotes = "";
+    string roomPaintRoomId = "", roomPaintPaintId = "", roomPaintSurface = "", roomPaintSortOrder = "0";
+
+    Guid? editingPaintId;
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+    }
+
+    void StartEdit(PaintDto paint)
+    {
+        editingPaintId = paint.Id;
+        paintBrand = paint.Brand;
+        paintColorName = paint.ColorName;
+        paintColorCode = paint.ColorCode ?? "";
+        paintFinish = paint.Finish ?? "";
+        paintNotes = paint.Notes ?? "";
+    }
+
+    void CancelEdit()
+    {
+        editingPaintId = null;
+        ClearForm();
+    }
+
+    void ClearForm()
+    {
+        paintBrand = paintColorName = paintColorCode = paintFinish = paintNotes = "";
+    }
+
+    async Task SavePaint()
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(paintBrand) || string.IsNullOrWhiteSpace(paintColorName)) { error = "Brand and color name are required."; return; }
+
+        HttpResponseMessage response;
+        if (editingPaintId is null)
+            response = await Http.PostAsJsonAsync("api/paints", new PaintInput(paintBrand, paintColorName, paintColorCode, paintFinish, paintNotes));
+        else
+            response = await Http.PutAsJsonAsync($"api/paints/{editingPaintId}", new PaintInput(paintBrand, paintColorName, paintColorCode, paintFinish, paintNotes));
+
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        editingPaintId = null;
+        ClearForm();
+        paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
+    }
+
+    async Task DeletePaint(Guid paintId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/paints/{paintId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
+    }
+
+    async Task LoadRoomPaints()
+    {
+        roomPaints = [];
+        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) return;
+        roomPaints = await Http.GetFromJsonAsync<List<RoomPaintDto>>($"api/rooms/{roomId}/paints") ?? [];
+    }
+
+    async Task AddRoomPaint()
+    {
+        error = null;
+        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        if (!Guid.TryParse(roomPaintPaintId, out var paintId)) { error = "Choose a paint first."; return; }
+        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/paints", new RoomPaintInput(paintId, TryInt(roomPaintSortOrder) ?? 0, roomPaintSurface));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        roomPaintPaintId = roomPaintSurface = "";
+        roomPaintSortOrder = "0";
+        await LoadRoomPaints();
+    }
+
+    async Task RemoveRoomPaint(Guid paintId)
+    {
+        error = null;
+        if (!Guid.TryParse(roomPaintRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        var response = await Http.DeleteAsync($"api/rooms/{roomId}/paints/{paintId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadRoomPaints();
+    }
+
+    static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
+}

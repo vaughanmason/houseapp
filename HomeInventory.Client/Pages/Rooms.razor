@@ -1,0 +1,271 @@
+@page "/rooms"
+@inject HttpClient Http
+
+<PageTitle>Rooms & Surfaces</PageTitle>
+
+<div class="mb-4">
+    <h1>Rooms & Surfaces</h1>
+    <p class="lead">Manage rooms, surfaces, and room details.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">@(editingRoomId is null ? "Add room" : "Edit room")</h2>
+            <select class="form-select mb-2" @bind="floorId">
+                <option value="">Choose floor</option>
+                @foreach (var floor in floors)
+                {
+                    var prop = properties.FirstOrDefault(p => p.Id == floor.PropertyId);
+                    <option value="@floor.Id">@prop?.Name - @floor.Name</option>
+                }
+            </select>
+            <input class="form-control mb-2" @bind="roomName" placeholder="Room name" />
+            <input class="form-control mb-2" @bind="roomType" placeholder="Type (e.g., Bedroom)" />
+            
+            <h5 class="mt-3">Dimensions</h5>
+            <div class="row g-2 mb-2">
+                <div class="col-md-4"><input class="form-control" @bind="roomLength" type="number" step="0.01" placeholder="Length" /></div>
+                <div class="col-md-4"><input class="form-control" @bind="roomWidth" type="number" step="0.01" placeholder="Width" /></div>
+                <div class="col-md-4"><input class="form-control" @bind="roomHeight" type="number" step="0.01" placeholder="Height" /></div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="roomArea" type="number" step="0.01" placeholder="Area" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="roomVolume" type="number" step="0.01" placeholder="Volume" /></div>
+            </div>
+            <input class="form-control mb-2" @bind="roomCeilingHeight" type="number" step="0.01" placeholder="Ceiling height" />
+
+            <h5 class="mt-3">Finishes</h5>
+            <input class="form-control mb-2" @bind="roomFlooring" placeholder="Flooring" />
+            <input class="form-control mb-2" @bind="roomWallFinish" placeholder="Wall finish" />
+            <input class="form-control mb-2" @bind="roomCeilingFinish" placeholder="Ceiling finish" />
+
+            <h5 class="mt-3">Details</h5>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="roomWindowsCount" type="number" placeholder="Windows count" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="roomDoorsCount" type="number" placeholder="Doors count" /></div>
+            </div>
+            <textarea class="form-control mb-2" @bind="roomFixturesNotes" placeholder="Fixtures notes"></textarea>
+            <textarea class="form-control mb-2" @bind="roomUtilitiesNotes" placeholder="Utilities notes"></textarea>
+            <textarea class="form-control mb-2" @bind="roomNotes" placeholder="General notes"></textarea>
+
+            <button class="btn btn-primary" @onclick="SaveRoom">@(editingRoomId is null ? "Add room" : "Update room")</button>
+            @if (editingRoomId is not null)
+            {
+                <button class="btn btn-outline-secondary ms-2" @onclick="CancelEdit">Cancel</button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <h2 class="h4">Rooms by floor</h2>
+        @if (floors.Count == 0)
+        {
+            <div class="alert alert-info">No floors found. <a href="floors">Create a floor first</a>.</div>
+        }
+        else if (rooms.Count == 0)
+        {
+            <div class="alert alert-info">No rooms yet. Add one to the left.</div>
+        }
+        else
+        {
+            @foreach (var floor in floors.OrderBy(f => f.Name))
+            {
+                var floorRooms = rooms.Where(r => r.FloorId == floor.Id).OrderBy(r => r.Name).ToList();
+                if (floorRooms.Count > 0)
+                {
+                    var prop = properties.FirstOrDefault(p => p.Id == floor.PropertyId);
+                    <div class="mb-3">
+                        <h5>@prop?.Name - @floor.Name</h5>
+                        <ul class="list-group">
+                            @foreach (var room in floorRooms)
+                            {
+                                <li class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong>@room.Name</strong> <span class="text-muted">@room.Type</span>
+                                            <div class="small text-muted">
+                                                Area: @FormatNumber(room.Area) · 
+                                                Volume: @FormatNumber(room.Volume) · 
+                                                Ceiling: @FormatNumber(room.CeilingHeight)
+                                            </div>
+                                            <div class="small text-muted">
+                                                Flooring: @room.Flooring · Wall: @room.WallFinish · Ceiling: @room.CeilingFinish
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(room)">Edit</button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteRoom(room.Id)">Delete</button>
+                                        </div>
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                }
+            }
+        }
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card card-body">
+            <h2 class="h4">Surfaces</h2>
+            <select class="form-select mb-2" @bind="roomSurfaceId" @bind:after="LoadSurfaces">
+                <option value="">Choose room</option>
+                @foreach (var room in rooms.OrderBy(r => r.Name)) { <option value="@room.Id">@room.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(roomSurfaceId))
+            {
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6"><input class="form-control" @bind="surfaceName" placeholder="Surface name" /></div>
+                    <div class="col-md-6"><input class="form-control" @bind="surfaceType" placeholder="Type (wall, ceiling, flooring, trim)" /></div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6"><input class="form-control" @bind="surfaceSortOrder" type="number" placeholder="Sort order" /></div>
+                    <div class="col-md-6"><input class="form-control" @bind="surfaceNotes" placeholder="Notes" /></div>
+                </div>
+                <button class="btn btn-outline-primary mb-3" @onclick="AddSurface">Add surface</button>
+                @if (surfaces.Count > 0)
+                {
+                    <ul class="list-group">
+                        @foreach (var surface in surfaces.OrderBy(s => s.SortOrder))
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><strong>@surface.Name</strong> <span class="text-muted">@surface.SurfaceType</span></span>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurface(surface.Id)">Delete</button>
+                            </li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <div class="alert alert-info">No surfaces yet.</div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    List<PropertyDto> properties = [];
+    List<FloorDto> floors = [];
+    List<RoomDto> rooms = [];
+    List<SurfaceDto> surfaces = [];
+
+    string floorId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "";
+    string roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "";
+    string roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
+    string roomSurfaceId = "", surfaceName = "", surfaceType = "", surfaceSortOrder = "0", surfaceNotes = "";
+    
+    Guid? editingRoomId;
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+        surfaces = [];
+    }
+
+    void StartEdit(RoomDto room)
+    {
+        editingRoomId = room.Id;
+        floorId = room.FloorId.ToString();
+        roomName = room.Name;
+        roomType = room.Type ?? "";
+        roomArea = room.Area?.ToString() ?? "";
+        roomVolume = room.Volume?.ToString() ?? "";
+        roomCeilingHeight = room.CeilingHeight?.ToString() ?? "";
+        roomLength = room.Length?.ToString() ?? "";
+        roomWidth = room.Width?.ToString() ?? "";
+        roomHeight = room.Height?.ToString() ?? "";
+        roomFlooring = room.Flooring ?? "";
+        roomWallFinish = room.WallFinish ?? "";
+        roomCeilingFinish = room.CeilingFinish ?? "";
+        roomWindowsCount = room.WindowsCount?.ToString() ?? "";
+        roomDoorsCount = room.DoorsCount?.ToString() ?? "";
+        roomFixturesNotes = room.FixturesNotes ?? "";
+        roomUtilitiesNotes = room.UtilitiesNotes ?? "";
+        roomNotes = room.Notes ?? "";
+    }
+
+    void CancelEdit()
+    {
+        editingRoomId = null;
+        ClearForm();
+    }
+
+    void ClearForm()
+    {
+        floorId = roomName = roomType = roomArea = roomVolume = roomCeilingHeight = roomLength = roomWidth = roomHeight = "";
+        roomFlooring = roomWallFinish = roomCeilingFinish = roomWindowsCount = roomDoorsCount = "";
+        roomFixturesNotes = roomUtilitiesNotes = roomNotes = "";
+    }
+
+    async Task SaveRoom()
+    {
+        error = null;
+        if (!Guid.TryParse(floorId, out var parsedFloorId)) { error = "Choose a floor first."; return; }
+        if (string.IsNullOrWhiteSpace(roomName)) { error = "Room name is required."; return; }
+
+        var response = editingRoomId is null
+            ? await Http.PostAsJsonAsync("api/rooms", new RoomInput(parsedFloorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes))
+            : await Http.PutAsJsonAsync($"api/rooms/{editingRoomId}", new RoomInput(parsedFloorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
+
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        editingRoomId = null;
+        ClearForm();
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+    }
+
+    async Task DeleteRoom(Guid roomId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/rooms/{roomId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+    }
+
+    async Task LoadSurfaces()
+    {
+        surfaces = [];
+        if (!Guid.TryParse(roomSurfaceId, out var roomId)) return;
+        surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
+    }
+
+    async Task AddSurface()
+    {
+        error = null;
+        if (!Guid.TryParse(roomSurfaceId, out var roomId)) { error = "Choose a room first."; return; }
+        if (string.IsNullOrWhiteSpace(surfaceName)) { error = "Surface name is required."; return; }
+        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/surfaces", new SurfaceInput(roomId, surfaceName, string.IsNullOrWhiteSpace(surfaceType) ? "wall" : surfaceType, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, surfaceNotes, TryInt(surfaceSortOrder) ?? 0));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        surfaceName = surfaceType = surfaceNotes = "";
+        surfaceSortOrder = "0";
+        await LoadSurfaces();
+    }
+
+    async Task DeleteSurface(Guid surfaceId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/surfaces/{surfaceId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadSurfaces();
+    }
+
+    static string FormatNumber(decimal? number) => number?.ToString("0.00") ?? "-";
+    static DateTime? TryDate(string? value) => DateTime.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
+    static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
+}
