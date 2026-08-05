@@ -54,6 +54,33 @@
     </div>
 </div>
 
+<div class="row g-4 mt-2">
+    <div class="col-12">
+        <div class="card card-body">
+            <h2 class="h4">Property photos</h2>
+            <select class="form-select mb-2" @bind="propertyPhotoPropertyId" @bind:after="LoadPropertyPhotos">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="propertyPhotoStorageKey" placeholder="Storage key" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="propertyPhotoCaption" placeholder="Caption" /></div>
+            </div>
+            <input class="form-control mb-2" @bind="propertyPhotoSortOrder" type="number" placeholder="Sort order" />
+            <button class="btn btn-outline-primary mb-3" @onclick="AddPropertyPhoto">Add photo</button>
+            <ul class="list-group">
+                @foreach (var photo in propertyPhotos)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePropertyPhoto(photo.Id)">Delete</button>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+</div>
+
 <hr class="my-4" />
 
 <div class="row g-4">
@@ -214,8 +241,10 @@
     List<RoomDto> rooms = [];
     List<PaintDto> paints = [];
     List<RoomPaintDto> roomPaints = [];
+    List<PhotoMetadataDto> propertyPhotos = [];
 
     string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyNotes = "";
+    string propertyPhotoPropertyId = "", propertyPhotoStorageKey = "", propertyPhotoCaption = "", propertyPhotoSortOrder = "0";
     string roomPropertyId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "", roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "", roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
 
     Guid? editingPropertyId;
@@ -237,6 +266,19 @@
         properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
         paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
+        if (string.IsNullOrWhiteSpace(propertyPhotoPropertyId) && properties.Count > 0)
+        {
+            propertyPhotoPropertyId = properties[0].Id.ToString();
+        }
+        if (Guid.TryParse(propertyPhotoPropertyId, out var propertyId) && properties.Any(x => x.Id == propertyId))
+        {
+            await LoadPropertyPhotos();
+        }
+        else
+        {
+            propertyPhotoPropertyId = "";
+            propertyPhotos = [];
+        }
     }
 
     async Task AddProperty()
@@ -378,6 +420,34 @@
         var response = await Http.DeleteAsync($"api/rooms/{roomId}/paints/{paintId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         await LoadRoomPaints();
+    }
+
+    async Task LoadPropertyPhotos()
+    {
+        propertyPhotos = [];
+        if (!Guid.TryParse(propertyPhotoPropertyId, out var propertyId)) return;
+        propertyPhotos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/properties/{propertyId}/photos") ?? [];
+    }
+
+    async Task AddPropertyPhoto()
+    {
+        error = null;
+        if (!Guid.TryParse(propertyPhotoPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        if (string.IsNullOrWhiteSpace(propertyPhotoStorageKey)) { error = "Provide a storage key for the photo."; return; }
+        var response = await Http.PostAsJsonAsync($"api/properties/{propertyId}/photos", new PhotoMetadataInput(propertyPhotoStorageKey, propertyPhotoCaption, TryInt(propertyPhotoSortOrder) ?? 0));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        propertyPhotoStorageKey = propertyPhotoCaption = "";
+        propertyPhotoSortOrder = "0";
+        await LoadPropertyPhotos();
+    }
+
+    async Task DeletePropertyPhoto(Guid photoId)
+    {
+        error = null;
+        if (!Guid.TryParse(propertyPhotoPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        var response = await Http.DeleteAsync($"api/properties/{propertyId}/photos/{photoId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadPropertyPhotos();
     }
 
     static DateOnly? TryDate(string value) => DateOnly.TryParse(value, out var parsed) ? parsed : (DateOnly?)null;

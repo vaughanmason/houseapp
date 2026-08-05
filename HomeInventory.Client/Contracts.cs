@@ -21,8 +21,9 @@ public sealed record StorageLocationInput(Guid PropertyId, Guid? ParentId, strin
 public sealed record AssetInput(Guid PropertyId, Guid? RoomId, Guid? StorageLocationId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes);
 public sealed record AssetMoveInput(Guid? RoomId, Guid? StorageLocationId);
 
-public sealed record InventoryExport(int SchemaVersion, List<ImportProperty> Properties, List<ImportRoom> Rooms, List<ImportStorageLocation> StorageLocations, List<ImportAsset> Assets);
+public sealed record InventoryExport(int SchemaVersion, List<ImportProperty> Properties, List<ImportRoom> Rooms, List<ImportStorageLocation> StorageLocations, List<ImportAsset> Assets, List<ImportPropertyPhoto> PropertyPhotos);
 public sealed record ImportProperty(string ExternalId, string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes);
+public sealed record ImportPropertyPhoto(string ExternalId, string PropertyExternalId, string? StorageKey, string? Caption, int SortOrder);
 public sealed record ImportRoom(string ExternalId, string PropertyExternalId, string Name, string? Type, decimal? Area, decimal? Volume, decimal? CeilingHeight, decimal? Length, decimal? Width, decimal? Height, string? Flooring, string? WallFinish, string? CeilingFinish, string? PaintDetails, int? WindowsCount, int? DoorsCount, string? FixturesNotes, string? UtilitiesNotes, string? Notes);
 public sealed record ImportStorageLocation(string ExternalId, string PropertyExternalId, string? ParentExternalId, string Name, string? Type);
 public sealed record ImportAsset(string ExternalId, string PropertyExternalId, string? RoomExternalId, string? StorageLocationExternalId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes);

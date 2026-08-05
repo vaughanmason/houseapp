@@ -121,6 +121,43 @@ public sealed class InventoryApiTests
         Assert.Equal(asset.Id, archivedAssets[0].Id);
     }
 
+    [Fact]
+    public async Task ImportPreviewAndConfirm_IncludesPropertyPhotos()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+
+        var import = new InventoryExport(
+            1,
+            [new ImportProperty("prop-1", "Main House", "123 Main St", null, null, null, null)],
+            [],
+            [],
+            [],
+            [new ImportPropertyPhoto("photo-1", "prop-1", "photos/main-house/front-door.jpg", "Front door", 1)]);
+
+        var previewResponse = await client.PostAsJsonAsync("/api/import/preview", import);
+        Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
+        var preview = await previewResponse.Content.ReadFromJsonAsync<ImportPreviewDto>();
+        Assert.NotNull(preview);
+        Assert.True(preview.IsValid);
+
+        var confirmResponse = await client.PostAsJsonAsync("/api/import/confirm", new { inventory = import, skipExternalIds = new List<string>() });
+        Assert.Equal(HttpStatusCode.NoContent, confirmResponse.StatusCode);
+
+        var propertyResponse = await client.GetAsync("/api/properties");
+        Assert.Equal(HttpStatusCode.OK, propertyResponse.StatusCode);
+        var properties = await propertyResponse.Content.ReadFromJsonAsync<List<PropertyDto>>();
+        Assert.NotNull(properties);
+        Assert.Single(properties);
+
+        var photosResponse = await client.GetAsync($"/api/properties/{properties[0].Id}/photos");
+        Assert.Equal(HttpStatusCode.OK, photosResponse.StatusCode);
+        var photos = await photosResponse.Content.ReadFromJsonAsync<List<PhotoMetadataDto>>();
+        Assert.NotNull(photos);
+        Assert.Single(photos);
+        Assert.Equal("Front door", photos[0].Caption);
+    }
+
     private static HttpClient CreateClient(CustomWebApplicationFactory factory) =>
         factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
 }
