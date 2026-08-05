@@ -84,6 +84,53 @@ public sealed class InventoryApiTests
     }
 
     [Fact]
+    public async Task CreateFixtureAndAssetPhotos_RetainsMetadata()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+
+        var propertyResponse = await client.PostAsJsonAsync("/api/properties", new PropertyInput("Rental", null, null, null, null, null));
+        var property = await propertyResponse.Content.ReadFromJsonAsync<PropertyDto>();
+        Assert.NotNull(property);
+
+        var floorResponse = await client.PostAsJsonAsync($"/api/properties/{property.Id}/floors", new FloorInput(property.Id, "Main Floor", null));
+        var floor = await floorResponse.Content.ReadFromJsonAsync<FloorDto>();
+        Assert.NotNull(floor);
+
+        var roomResponse = await client.PostAsJsonAsync("/api/rooms", new RoomInput(floor.Id, "Kitchen", "Kitchen", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+        var room = await roomResponse.Content.ReadFromJsonAsync<RoomDto>();
+        Assert.NotNull(room);
+
+        var fixtureResponse = await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", new FixtureInput(room.Id, "Sink", "Sink", "Acme", "Model-1", "SN123", new DateOnly(2024, 1, 2), 400m, 350m, "2 years", "https://example.com/manual", "Bob", new DateOnly(2024, 1, 3), "Annual", new DateOnly(2025, 1, 3), "Good", "Kitchen sink"));
+        Assert.Equal(HttpStatusCode.Created, fixtureResponse.StatusCode);
+        var fixture = await fixtureResponse.Content.ReadFromJsonAsync<FixtureDto>();
+        Assert.NotNull(fixture);
+
+        var fixturePhotoResponse = await client.PostAsJsonAsync($"/api/fixtures/{fixture.Id}/photos", new FixturePhotoInput("fixtures/sink.jpg", "Under sink", 1));
+        Assert.Equal(HttpStatusCode.Created, fixturePhotoResponse.StatusCode);
+
+        var assetResponse = await client.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, room.Id, null, "Couch", "Furniture", "Living room sofa", "Acme", "Model 1", "ABC123", new DateOnly(2024, 1, 2), 500m, 450m, "Good", "Comfortable"));
+        Assert.Equal(HttpStatusCode.Created, assetResponse.StatusCode);
+        var asset = await assetResponse.Content.ReadFromJsonAsync<AssetDto>();
+        Assert.NotNull(asset);
+
+        var assetPhotoResponse = await client.PostAsJsonAsync($"/api/assets/{asset.Id}/photos", new AssetPhotoInput("assets/couch.jpg", "Living room", 1));
+        Assert.Equal(HttpStatusCode.Created, assetPhotoResponse.StatusCode);
+
+        var fixturePhotosResponse = await client.GetAsync($"/api/fixtures/{fixture.Id}/photos");
+        Assert.Equal(HttpStatusCode.OK, fixturePhotosResponse.StatusCode);
+        var fixturePhotos = await fixturePhotosResponse.Content.ReadFromJsonAsync<List<FixturePhotoDto>>();
+        Assert.NotNull(fixturePhotos);
+        Assert.Single(fixturePhotos);
+
+        var assetPhotosResponse = await client.GetAsync($"/api/assets/{asset.Id}/photos");
+        Assert.Equal(HttpStatusCode.OK, assetPhotosResponse.StatusCode);
+        var assetPhotos = await assetPhotosResponse.Content.ReadFromJsonAsync<List<AssetPhotoDto>>();
+        Assert.NotNull(assetPhotos);
+        Assert.Single(assetPhotos);
+    }
+
+    [Fact]
     public async Task CreateAsset_AndArchive_UpdatesState()
     {
         using var factory = new CustomWebApplicationFactory();

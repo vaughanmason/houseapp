@@ -219,6 +219,109 @@ public static class InventoryApi
             return Results.NoContent();
         });
 
+        api.MapGet("/rooms/{id:guid}/fixtures", async (Guid id, InventoryDbContext db) =>
+        {
+            if (!await db.Rooms.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            return Results.Ok(await FixtureDtos(db, db.Fixtures.Where(x => x.RoomId == id)));
+        });
+        api.MapPost("/rooms/{id:guid}/fixtures", async (Guid id, FixtureInput input, InventoryDbContext db) =>
+        {
+            if (!await db.Rooms.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Type))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Name is required."], ["type"] = ["Type is required."] });
+            var entity = new Fixture
+            {
+                RoomId = id,
+                Name = input.Name.Trim(),
+                Type = input.Type.Trim(),
+                Manufacturer = input.Manufacturer?.Trim(),
+                Model = input.Model?.Trim(),
+                SerialNumber = input.SerialNumber?.Trim(),
+                PurchaseDate = input.PurchaseDate,
+                PurchasePrice = input.PurchasePrice,
+                CurrentValue = input.CurrentValue,
+                Warranty = input.Warranty?.Trim(),
+                ManualUrl = input.ManualUrl?.Trim(),
+                InstallerName = input.InstallerName?.Trim(),
+                InstallationDate = input.InstallationDate,
+                MaintenanceSchedule = input.MaintenanceSchedule?.Trim(),
+                LastMaintenanceDate = input.LastMaintenanceDate,
+                Condition = input.Condition?.Trim(),
+                Notes = input.Notes?.Trim()
+            };
+            db.Fixtures.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/fixtures/{entity.Id}", (await FixtureDtos(db, db.Fixtures.Where(x => x.Id == entity.Id))).Single());
+        });
+        api.MapGet("/fixtures", async (Guid? roomId, Guid? propertyId, InventoryDbContext db) =>
+        {
+            var fixtures = db.Fixtures.AsQueryable();
+            if (roomId is not null) fixtures = fixtures.Where(x => x.RoomId == roomId.Value);
+            else if (propertyId is not null) fixtures = fixtures.Where(x => x.Room != null && x.Room.Floor != null && x.Room.Floor.PropertyId == propertyId.Value);
+            return Results.Ok(await FixtureDtos(db, fixtures));
+        });
+        api.MapGet("/fixtures/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.Fixtures.FindAsync(id);
+            return entity is null ? Results.NotFound() : Results.Ok((await FixtureDtos(db, db.Fixtures.Where(x => x.Id == entity.Id))).Single());
+        });
+        api.MapPut("/fixtures/{id:guid}", async (Guid id, FixtureInput input, InventoryDbContext db) =>
+        {
+            var entity = await db.Fixtures.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Type))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Name is required."], ["type"] = ["Type is required."] });
+            entity.RoomId = input.RoomId;
+            entity.Name = input.Name.Trim();
+            entity.Type = input.Type.Trim();
+            entity.Manufacturer = input.Manufacturer?.Trim();
+            entity.Model = input.Model?.Trim();
+            entity.SerialNumber = input.SerialNumber?.Trim();
+            entity.PurchaseDate = input.PurchaseDate;
+            entity.PurchasePrice = input.PurchasePrice;
+            entity.CurrentValue = input.CurrentValue;
+            entity.Warranty = input.Warranty?.Trim();
+            entity.ManualUrl = input.ManualUrl?.Trim();
+            entity.InstallerName = input.InstallerName?.Trim();
+            entity.InstallationDate = input.InstallationDate;
+            entity.MaintenanceSchedule = input.MaintenanceSchedule?.Trim();
+            entity.LastMaintenanceDate = input.LastMaintenanceDate;
+            entity.Condition = input.Condition?.Trim();
+            entity.Notes = input.Notes?.Trim();
+            await db.SaveChangesAsync();
+            return Results.Ok((await FixtureDtos(db, db.Fixtures.Where(x => x.Id == entity.Id))).Single());
+        });
+        api.MapDelete("/fixtures/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.Fixtures.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            db.Fixtures.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+        api.MapGet("/fixtures/{id:guid}/photos", async (Guid id, InventoryDbContext db) =>
+        {
+            if (!await db.Fixtures.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            return Results.Ok(await db.FixturePhotos.Where(x => x.FixtureId == id).OrderBy(x => x.SortOrder).ThenBy(x => x.Id).Select(x => ToDto(x)).ToListAsync());
+        });
+        api.MapPost("/fixtures/{id:guid}/photos", async (Guid id, FixturePhotoInput input, InventoryDbContext db) =>
+        {
+            if (!await db.Fixtures.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(input.StorageKey)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["storageKey"] = ["Storage key is required."] });
+            var entity = new FixturePhoto { FixtureId = id, StorageKey = input.StorageKey.Trim(), Caption = input.Caption?.Trim(), SortOrder = input.SortOrder };
+            db.FixturePhotos.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/fixtures/{id}/photos/{entity.Id}", ToDto(entity));
+        });
+        api.MapDelete("/fixtures/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db) =>
+        {
+            var entity = await db.FixturePhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.FixtureId == id);
+            if (entity is null) return Results.NotFound();
+            db.FixturePhotos.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
         api.MapGet("/paints", async (InventoryDbContext db) => Results.Ok(await db.Paints.OrderBy(x => x.Brand).ThenBy(x => x.ColorName).Select(x => ToDto(x)).ToListAsync()));
         api.MapPost("/paints", async (PaintInput input, InventoryDbContext db) =>
         {
@@ -348,10 +451,19 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Ok((await AssetDtos(db, input.PropertyId, entity.IsArchived)).Single(x => x.Id == id));
         });
+        api.MapDelete("/assets/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.Assets.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            db.Assets.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
         api.MapPost("/assets/{id:guid}/move", async (Guid id, AssetMoveInput input, InventoryDbContext db) =>
         {
             var entity = await db.Assets.FindAsync(id);
             if (entity is null) return Results.NotFound();
+            if (input.RoomId is not null && input.StorageLocationId is not null) return Results.BadRequest("Choose either a room or a storage location, not both.");
             if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == entity.PropertyId)) return Results.BadRequest("Room must be in the asset property.");
             if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == entity.PropertyId)) return Results.BadRequest("Storage location must be in the asset property.");
             entity.RoomId = input.RoomId;
@@ -367,23 +479,50 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
+        api.MapGet("/assets/{id:guid}/photos", async (Guid id, InventoryDbContext db) =>
+        {
+            if (!await db.Assets.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            return Results.Ok(await db.AssetPhotos.Where(x => x.AssetId == id).OrderBy(x => x.SortOrder).ThenBy(x => x.Id).Select(x => ToDto(x)).ToListAsync());
+        });
+        api.MapPost("/assets/{id:guid}/photos", async (Guid id, AssetPhotoInput input, InventoryDbContext db) =>
+        {
+            if (!await db.Assets.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(input.StorageKey)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["storageKey"] = ["Storage key is required."] });
+            var entity = new AssetPhoto { AssetId = id, StorageKey = input.StorageKey.Trim(), Caption = input.Caption?.Trim(), SortOrder = input.SortOrder };
+            db.AssetPhotos.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/assets/{id}/photos/{entity.Id}", ToDto(entity));
+        });
+        api.MapDelete("/assets/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db) =>
+        {
+            var entity = await db.AssetPhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.AssetId == id);
+            if (entity is null) return Results.NotFound();
+            db.AssetPhotos.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
 
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {
             // TODO: Include due maintenance, expiring warranties, missing receipts, recent purchases, and room completion metrics.
             var assets = db.Assets.Where(x => !x.IsArchived);
-            var categories = (await assets.GroupBy(x => x.Category).Select(x => new { Category = x.Key, Total = x.Sum(a => a.CurrentValue ?? 0) }).OrderByDescending(x => x.Total).ToListAsync())
+            var fixtures = db.Fixtures;
+            var assetCategories = (await assets.GroupBy(x => x.Category).Select(x => new { Category = x.Key, Total = x.Sum(a => a.CurrentValue ?? 0) }).OrderByDescending(x => x.Total).ToListAsync())
                 .Select(x => new CategoryTotalDto(x.Category, x.Total)).ToList();
-            return new DashboardDto(await assets.CountAsync(), categories.Sum(x => x.Total), categories);
+            var fixtureCategories = (await fixtures.GroupBy(x => x.Type).Select(x => new { Category = x.Key, Total = x.Sum(a => a.CurrentValue ?? 0) }).OrderByDescending(x => x.Total).ToListAsync())
+                .Select(x => new CategoryTotalDto(x.Category, x.Total)).ToList();
+            var combinedCategories = assetCategories.Concat(fixtureCategories).GroupBy(x => x.Category).Select(x => new CategoryTotalDto(x.Key, x.Sum(y => y.Total))).OrderByDescending(x => x.Total).ToList();
+            return new DashboardDto(await assets.CountAsync(), combinedCategories.Sum(x => x.Total), combinedCategories, await fixtures.CountAsync(), await fixtures.SumAsync(x => x.CurrentValue ?? 0));
         });
         api.MapGet("/search", async (string? q, InventoryDbContext db) =>
         {
-            // TODO: Search planned documents, warranties, paint, fixtures, utilities, and OCR text in addition to assets and storage.
             if (string.IsNullOrWhiteSpace(q)) return Results.Ok(Array.Empty<SearchResultDto>());
             var term = q.Trim().ToLower();
             var assets = await AssetDtos(db, null, false);
+            var fixtures = await FixtureDtos(db, db.Fixtures.AsQueryable());
             var locations = await LocationDtos(db, null);
             var results = assets.Where(x => $"{x.Name} {x.Category} {x.Brand} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Asset", x.Id, x.Name, x.Category, x.LocationPath))
+                .Concat(fixtures.Where(x => $"{x.Name} {x.Type} {x.Manufacturer} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Fixture", x.Id, x.Name, x.Type, x.LocationPath)))
                 .Concat(locations.Where(x => $"{x.Name} {x.Type} {x.Path}".ToLower().Contains(term)).Select(x => new SearchResultDto("Storage", x.Id, x.Name, x.Type ?? "Storage location", x.Path))).Take(50);
             return Results.Ok(results);
         });
@@ -399,6 +538,7 @@ public static class InventoryApi
             var floors = new Dictionary<string, Guid>();
             var rooms = new Dictionary<string, Guid>();
             var locations = new Dictionary<string, Guid>();
+            var assets = new Dictionary<string, Guid>();
 
             foreach (var property in confirmation.Inventory.Properties)
             {
@@ -447,7 +587,14 @@ public static class InventoryApi
                 db.StorageLocations.Add(entity);
                 locations[location.ExternalId] = entity.Id;
             }
-            foreach (var asset in confirmation.Inventory.Assets.Where(x => !confirmation.SkipExternalIds.Contains(x.ExternalId))) db.Assets.Add(new Asset { PropertyId = properties[asset.PropertyExternalId], RoomId = asset.RoomExternalId is null ? null : rooms[asset.RoomExternalId], StorageLocationId = asset.StorageLocationExternalId is null ? null : locations[asset.StorageLocationExternalId], Name = asset.Name, Category = asset.Category, Description = asset.Description, Brand = asset.Brand, Model = asset.Model, SerialNumber = asset.SerialNumber, PurchaseDate = asset.PurchaseDate, PurchasePrice = asset.PurchasePrice, CurrentValue = asset.CurrentValue, Condition = asset.Condition, Notes = asset.Notes });
+            foreach (var fixture in confirmation.Inventory.Fixtures ?? []) db.Fixtures.Add(new Fixture { RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, MaintenanceSchedule = fixture.MaintenanceSchedule, LastMaintenanceDate = fixture.LastMaintenanceDate, Condition = fixture.Condition, Notes = fixture.Notes });
+            foreach (var asset in confirmation.Inventory.Assets.Where(x => !confirmation.SkipExternalIds.Contains(x.ExternalId)))
+            {
+                var entity = new Asset { PropertyId = properties[asset.PropertyExternalId], RoomId = asset.RoomExternalId is null ? null : rooms[asset.RoomExternalId], StorageLocationId = asset.StorageLocationExternalId is null ? null : locations[asset.StorageLocationExternalId], Name = asset.Name, Category = asset.Category, Description = asset.Description, Brand = asset.Brand, Model = asset.Model, SerialNumber = asset.SerialNumber, PurchaseDate = asset.PurchaseDate, PurchasePrice = asset.PurchasePrice, CurrentValue = asset.CurrentValue, Condition = asset.Condition, Notes = asset.Notes };
+                db.Assets.Add(entity);
+                assets[asset.ExternalId] = entity.Id;
+            }
+            foreach (var photo in confirmation.Inventory.AssetPhotos ?? []) db.AssetPhotos.Add(new AssetPhoto { AssetId = assets[photo.AssetExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
             return Results.NoContent();
@@ -457,12 +604,15 @@ public static class InventoryApi
 
     public sealed record ImportConfirmation(InventoryExport Inventory, List<string> SkipExternalIds);
     static PropertyDto ToDto(Property x) => new(x.Id, x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes);
+    static FixtureDto ToDto(Fixture x, string? locationPath) => new(x.Id, x.RoomId, x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, locationPath);
     static FloorDto ToDto(Floor x) => new(x.Id, x.PropertyId, x.Name, x.Notes);
     static RoomDto ToDto(Room x) => new(x.Id, x.FloorId ?? Guid.Empty, x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes);
     static SurfaceDto ToDto(Surface x) => new(x.Id, x.RoomId, x.Name, x.SurfaceType, x.PaintBrand, x.ColorName, x.ColorCode, x.Finish, x.Coats, x.PaintedDate, x.Painter, x.QuantityPurchased, x.Manufacturer, x.ProductName, x.Material, x.Supplier, x.Warranty, x.Invoice, x.InstallationDate, x.Notes, x.SortOrder);
     static PaintDto ToDto(Paint x) => new(x.Id, x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes);
     static PhotoMetadataDto ToDto(PropertyPhoto x) => new(x.Id, x.StorageKey, x.Caption, x.SortOrder);
     static PhotoMetadataDto ToDto(RoomPhoto x) => new(x.Id, x.StorageKey, x.Caption, x.SortOrder);
+    static FixturePhotoDto ToDto(FixturePhoto x) => new(x.Id, x.StorageKey, x.Caption, x.SortOrder);
+    static AssetPhotoDto ToDto(AssetPhoto x) => new(x.Id, x.StorageKey, x.Caption, x.SortOrder);
     static async Task<List<RoomPaintDto>> RoomPaintDtos(InventoryDbContext db, Guid roomId) =>
         await db.RoomPaints
             .Where(x => x.RoomId == roomId)
@@ -473,13 +623,20 @@ public static class InventoryApi
             .Select(x => new RoomPaintDto(x.Id, x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes, x.SortOrder, x.Surface))
             .ToListAsync();
     static async Task<List<StorageLocationDto>> LocationDtos(InventoryDbContext db, Guid? propertyId) { var list = await db.StorageLocations.Where(x => propertyId == null || x.PropertyId == propertyId).ToListAsync(); return list.Select(x => new StorageLocationDto(x.Id, x.PropertyId, x.ParentId, x.Name, x.Type, Path(x, list))).OrderBy(x => x.Path).ToList(); }
+    static async Task<List<FixtureDto>> FixtureDtos(InventoryDbContext db, IQueryable<Fixture>? fixtures = null)
+    {
+        var query = fixtures ?? db.Fixtures.AsQueryable();
+        var rooms = await db.Rooms.Include(x => x.Floor).ThenInclude(x => x.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
+        var list = await query.OrderBy(x => x.Name).ToListAsync();
+        return list.Select(x => ToDto(x, rooms.TryGetValue(x.RoomId, out var path) ? path : null)).ToList();
+    }
     static async Task<List<AssetDto>> AssetDtos(InventoryDbContext db, Guid? propertyId, bool archived) { var locations = await LocationDtos(db, propertyId); var roomNames = await db.Rooms.Where(x => propertyId == null || x.Floor != null && x.Floor.PropertyId == propertyId).ToDictionaryAsync(x => x.Id, x => x.Name); var list = await db.Assets.Where(x => (propertyId == null || x.PropertyId == propertyId) && x.IsArchived == archived).ToListAsync(); return list.OrderBy(x => x.Name).Select(x => new AssetDto(x.Id,x.PropertyId,x.RoomId,x.StorageLocationId,x.Name,x.Category,x.Description,x.Brand,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Condition,x.Notes,x.IsArchived,x.StorageLocationId is not null ? locations.SingleOrDefault(l => l.Id == x.StorageLocationId)?.Path : x.RoomId is not null && roomNames.TryGetValue(x.RoomId.Value, out var n) ? n : null)).ToList(); }
     static string Path(StorageLocation item, List<StorageLocation> all) => item.ParentId is null ? item.Name : $"{Path(all.Single(x => x.Id == item.ParentId), all)} → {item.Name}";
-    static async Task<string?> ValidateAsset(AssetInput input, InventoryDbContext db) { if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Category)) return "Asset name and category are required."; if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return "The selected property does not exist."; if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == input.PropertyId)) return "Room must be in the selected property."; if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == input.PropertyId)) return "Storage location must be in the selected property."; return null; }
+    static async Task<string?> ValidateAsset(AssetInput input, InventoryDbContext db) { if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Category)) return "Asset name and category are required."; if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return "The selected property does not exist."; if (input.RoomId is not null && input.StorageLocationId is not null) return "Choose either a room or a storage location, not both."; if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == input.PropertyId)) return "Room must be in the selected property."; if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == input.PropertyId)) return "Storage location must be in the selected property."; return null; }
     static Asset NewAsset(AssetInput x) { var a = new Asset { Name = "", Category = "" }; Apply(x, a); return a; }
     static void Apply(AssetInput x, Asset a) { a.PropertyId=x.PropertyId;a.RoomId=x.RoomId;a.StorageLocationId=x.StorageLocationId;a.Name=x.Name.Trim();a.Category=x.Category.Trim();a.Description=x.Description?.Trim();a.Brand=x.Brand?.Trim();a.Model=x.Model?.Trim();a.SerialNumber=x.SerialNumber?.Trim();a.PurchaseDate=x.PurchaseDate;a.PurchasePrice=x.PurchasePrice;a.CurrentValue=x.CurrentValue;a.Condition=x.Condition?.Trim();a.Notes=x.Notes?.Trim(); }
-    static async Task<InventoryExport> Export(InventoryDbContext db) { var props=await db.Properties.ToListAsync();var floors=await db.Floors.ToListAsync();var rooms=await db.Rooms.ToListAsync();var surfaces=await db.Surfaces.ToListAsync();var locs=await db.StorageLocations.ToListAsync();var assets=await db.Assets.ToListAsync();var propertyPhotos=await db.PropertyPhotos.ToListAsync();return new(1,props.Select(x=>new ImportProperty(x.Id.ToString(),x.Name,x.Address,x.PurchaseDate,x.PurchasePrice,x.FloorArea,x.Notes)).ToList(),floors.Select(x=>new ImportFloor(x.Id.ToString(),x.PropertyId.ToString(),x.Name,x.Notes)).ToList(),rooms.Select(x=>new ImportRoom(x.Id.ToString(),x.FloorId?.ToString() ?? string.Empty,x.Name,x.Type,x.Area,x.Volume,x.CeilingHeight,x.Length,x.Width,x.Height,x.Flooring,x.WallFinish,x.CeilingFinish,x.PaintDetails,x.WindowsCount,x.DoorsCount,x.FixturesNotes,x.UtilitiesNotes,x.Notes)).ToList(),surfaces.Select(x=>new ImportSurface(x.Id.ToString(),x.RoomId.ToString(),x.Name,x.SurfaceType,x.PaintBrand,x.ColorName,x.ColorCode,x.Finish,x.Coats,x.PaintedDate,x.Painter,x.QuantityPurchased,x.Manufacturer,x.ProductName,x.Material,x.Supplier,x.Warranty,x.Invoice,x.InstallationDate,x.Notes,x.SortOrder)).ToList(),locs.Select(x=>new ImportStorageLocation(x.Id.ToString(),x.PropertyId.ToString(),x.ParentId?.ToString(),x.Name,x.Type)).ToList(),assets.Where(x=>!x.IsArchived).Select(x=>new ImportAsset(x.Id.ToString(),x.PropertyId.ToString(),x.RoomId?.ToString(),x.StorageLocationId?.ToString(),x.Name,x.Category,x.Description,x.Brand,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Condition,x.Notes)).ToList(),propertyPhotos.Select(x=>new ImportPropertyPhoto(x.Id.ToString(),x.PropertyId.ToString(),x.StorageKey,x.Caption,x.SortOrder)).ToList()); }
-    static async Task<ImportPreviewDto> Preview(InventoryExport i, InventoryDbContext db) { var errors=new List<string>(); if(i.SchemaVersion!=1) errors.Add("Only schemaVersion 1 is supported."); var ids=i.Properties.Select(x=>x.ExternalId).Concat(i.Floors.Select(x=>x.ExternalId)).Concat(i.Rooms.Select(x=>x.ExternalId)).Concat(i.Surfaces.Select(x=>x.ExternalId)).Concat(i.StorageLocations.Select(x=>x.ExternalId)).Concat(i.Assets.Select(x=>x.ExternalId)).Concat(i.PropertyPhotos.Select(x=>x.ExternalId)).ToList();if(ids.Any(string.IsNullOrWhiteSpace)||ids.Count!=ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");var propIds=i.Properties.Select(x=>x.ExternalId).ToHashSet();var floorIds=i.Floors.Select(x=>x.ExternalId).ToHashSet();var roomIds=i.Rooms.Select(x=>x.ExternalId).ToHashSet();var surfaceIds=i.Surfaces.Select(x=>x.ExternalId).ToHashSet();var locIds=i.StorageLocations.Select(x=>x.ExternalId).ToHashSet();if(i.Properties.Any(x=>string.IsNullOrWhiteSpace(x.Name))||i.Assets.Any(x=>string.IsNullOrWhiteSpace(x.Name)||string.IsNullOrWhiteSpace(x.Category))) errors.Add("Properties and assets require names; assets also require categories.");if(i.PropertyPhotos.Any(x=>string.IsNullOrWhiteSpace(x.StorageKey)||string.IsNullOrWhiteSpace(x.PropertyExternalId))) errors.Add("Property photos require a storage key and a referenced property.");if(i.Floors.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Rooms.Any(x=>!floorIds.Contains(x.FloorExternalId))||i.StorageLocations.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Assets.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.PropertyPhotos.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Surfaces.Any(x=>!roomIds.Contains(x.RoomExternalId))) errors.Add("Every floor, room, surface, location, asset, and property photo must reference an imported parent record.");if(i.Assets.Any(x=>x.RoomExternalId is not null&&!roomIds.Contains(x.RoomExternalId)||x.StorageLocationExternalId is not null&&!locIds.Contains(x.StorageLocationExternalId))) errors.Add("Assets reference an unknown room or storage location.");var existing=await AssetDtos(db,null,false);var duplicates=i.Assets.Where(a=>existing.Any(e=>Norm(e.Name)==Norm(a.Name)&&Norm(e.LocationPath)==Norm(LocationImportPath(a,i)))).Select(x=>x.ExternalId).ToList();return new(errors.Count==0,errors,i.Properties.Count,i.Floors.Count,i.Rooms.Count,i.Surfaces.Count,i.StorageLocations.Count,i.Assets.Count,duplicates); }
+    static async Task<InventoryExport> Export(InventoryDbContext db) { var props=await db.Properties.ToListAsync();var floors=await db.Floors.ToListAsync();var rooms=await db.Rooms.ToListAsync();var surfaces=await db.Surfaces.ToListAsync();var fixtures=await db.Fixtures.ToListAsync();var locs=await db.StorageLocations.ToListAsync();var assets=await db.Assets.ToListAsync();var propertyPhotos=await db.PropertyPhotos.ToListAsync();var assetPhotos=await db.AssetPhotos.ToListAsync();return new(1,props.Select(x=>new ImportProperty(x.Id.ToString(),x.Name,x.Address,x.PurchaseDate,x.PurchasePrice,x.FloorArea,x.Notes)).ToList(),floors.Select(x=>new ImportFloor(x.Id.ToString(),x.PropertyId.ToString(),x.Name,x.Notes)).ToList(),rooms.Select(x=>new ImportRoom(x.Id.ToString(),x.FloorId?.ToString() ?? string.Empty,x.Name,x.Type,x.Area,x.Volume,x.CeilingHeight,x.Length,x.Width,x.Height,x.Flooring,x.WallFinish,x.CeilingFinish,x.PaintDetails,x.WindowsCount,x.DoorsCount,x.FixturesNotes,x.UtilitiesNotes,x.Notes)).ToList(),surfaces.Select(x=>new ImportSurface(x.Id.ToString(),x.RoomId.ToString(),x.Name,x.SurfaceType,x.PaintBrand,x.ColorName,x.ColorCode,x.Finish,x.Coats,x.PaintedDate,x.Painter,x.QuantityPurchased,x.Manufacturer,x.ProductName,x.Material,x.Supplier,x.Warranty,x.Invoice,x.InstallationDate,x.Notes,x.SortOrder)).ToList(),locs.Select(x=>new ImportStorageLocation(x.Id.ToString(),x.PropertyId.ToString(),x.ParentId?.ToString(),x.Name,x.Type)).ToList(),assets.Where(x=>!x.IsArchived).Select(x=>new ImportAsset(x.Id.ToString(),x.PropertyId.ToString(),x.RoomId?.ToString(),x.StorageLocationId?.ToString(),x.Name,x.Category,x.Description,x.Brand,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Condition,x.Notes)).ToList(),propertyPhotos.Select(x=>new ImportPropertyPhoto(x.Id.ToString(),x.PropertyId.ToString(),x.StorageKey,x.Caption,x.SortOrder)).ToList(),fixtures.Select(x=>new ImportFixture(x.Id.ToString(),x.RoomId.ToString(),x.Name,x.Type,x.Manufacturer,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Warranty,x.ManualUrl,x.InstallerName,x.InstallationDate,x.MaintenanceSchedule,x.LastMaintenanceDate,x.Condition,x.Notes)).ToList(),assetPhotos.Select(x=>new ImportAssetPhoto(x.Id.ToString(),x.AssetId.ToString(),x.StorageKey,x.Caption,x.SortOrder)).ToList()); }
+    static async Task<ImportPreviewDto> Preview(InventoryExport i, InventoryDbContext db) { var errors=new List<string>(); if(i.SchemaVersion!=1) errors.Add("Only schemaVersion 1 is supported."); var fixtures = i.Fixtures ?? []; var assetPhotos = i.AssetPhotos ?? []; var ids=i.Properties.Select(x=>x.ExternalId).Concat(i.Floors.Select(x=>x.ExternalId)).Concat(i.Rooms.Select(x=>x.ExternalId)).Concat(i.Surfaces.Select(x=>x.ExternalId)).Concat(i.StorageLocations.Select(x=>x.ExternalId)).Concat(i.Assets.Select(x=>x.ExternalId)).Concat(i.PropertyPhotos.Select(x=>x.ExternalId)).Concat(fixtures.Select(x=>x.ExternalId)).Concat(assetPhotos.Select(x=>x.ExternalId)).ToList();if(ids.Any(string.IsNullOrWhiteSpace)||ids.Count!=ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");var propIds=i.Properties.Select(x=>x.ExternalId).ToHashSet();var floorIds=i.Floors.Select(x=>x.ExternalId).ToHashSet();var roomIds=i.Rooms.Select(x=>x.ExternalId).ToHashSet();var locIds=i.StorageLocations.Select(x=>x.ExternalId).ToHashSet();if(i.Properties.Any(x=>string.IsNullOrWhiteSpace(x.Name))||i.Assets.Any(x=>string.IsNullOrWhiteSpace(x.Name)||string.IsNullOrWhiteSpace(x.Category))) errors.Add("Properties and assets require names; assets also require categories.");if(i.PropertyPhotos.Any(x=>string.IsNullOrWhiteSpace(x.StorageKey)||string.IsNullOrWhiteSpace(x.PropertyExternalId))) errors.Add("Property photos require a storage key and a referenced property.");if(fixtures.Any(x=>string.IsNullOrWhiteSpace(x.RoomExternalId)||string.IsNullOrWhiteSpace(x.Name)||string.IsNullOrWhiteSpace(x.Type))) errors.Add("Fixtures require a room reference, name, and type.");if(assetPhotos.Any(x=>string.IsNullOrWhiteSpace(x.AssetExternalId))) errors.Add("Asset photos require a referenced asset.");if(i.Floors.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Rooms.Any(x=>!floorIds.Contains(x.FloorExternalId))||i.StorageLocations.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Assets.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.PropertyPhotos.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Surfaces.Any(x=>!roomIds.Contains(x.RoomExternalId))||fixtures.Any(x=>!roomIds.Contains(x.RoomExternalId))||assetPhotos.Any(x=>!i.Assets.Any(a=>a.ExternalId==x.AssetExternalId))) errors.Add("Every floor, room, surface, location, asset, property photo, fixture, and asset photo must reference an imported parent record.");if(i.Assets.Any(x=>x.RoomExternalId is not null&&!roomIds.Contains(x.RoomExternalId)||x.StorageLocationExternalId is not null&&!locIds.Contains(x.StorageLocationExternalId))) errors.Add("Assets reference an unknown room or storage location.");var existing=await AssetDtos(db,null,false);var duplicates=i.Assets.Where(a=>existing.Any(e=>Norm(e.Name)==Norm(a.Name)&&Norm(e.LocationPath)==Norm(LocationImportPath(a,i)))).Select(x=>x.ExternalId).ToList();return new(errors.Count==0,errors,i.Properties.Count,i.Floors.Count,i.Rooms.Count,i.Surfaces.Count,i.StorageLocations.Count,i.Assets.Count,duplicates); }
     static string? LocationImportPath(ImportAsset a, InventoryExport i)
     {
         if (a.StorageLocationExternalId is null) return a.RoomExternalId is null ? null : i.Rooms.SingleOrDefault(x => x.ExternalId == a.RoomExternalId)?.Name;

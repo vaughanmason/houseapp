@@ -19,10 +19,11 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Rooms owned by floors with area/volume, finish notes, window/door counts, utilities/fixtures notes, and paint assignments
 - Surfaces attached to rooms with type-based metadata (wall, ceiling, flooring, trim)
 - Nested storage location hierarchy with server-computed paths (`Parent → Child`) per property
-- Assets with categories, brand/model/serial numbers, valuation, condition, and archive toggle
-- Photo metadata registry for external storage references on properties and rooms
-- Dashboard summary metrics and category totals
-- Text search across asset names/categories/brands/serial numbers
+- Assets with categories, brand/model/serial numbers, valuation, condition, archive toggle, and optional room/storage-location placement
+- Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
+- Photo metadata registry for external storage references on properties, rooms, fixtures, and assets
+- Dashboard summary metrics and category totals, including fixture and photo-backed inventory context
+- Text search across asset names/categories/brands/serial numbers and fixture names/types
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 
 ## API Endpoints (`/api`)
@@ -35,7 +36,10 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 | Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
 | Paints (library) | GET/POST/PUT/DELETE paints; `rooms/{roomId}/paints` assign colours to room surfaces | Registry-first approach with room-specific mappings |
 | StorageLocations | GET by property, POST/PUT tree edits | Self-referencing hierarchy scoped per property |
-| Assets | GET list/filter/archive, CRUD, move endpoint, archive toggle | Cross-entity validation is enforced for property/floor/room references |
+| Assets | GET list/filter/archive, CRUD, move endpoint, archive toggle, photo CRUD | Cross-entity validation is enforced for property/floor/room references |
+| Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` | Room-scoped permanent items with type-specific metadata |
+| FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
+| AssetPhotos | GET/POST/DELETE under `/assets/{id}/photos` | External photo references for assets |
 
 ## Import Contract (`schemaVersion: 1`)
 
@@ -47,7 +51,9 @@ InventoryExport {
   Surfaces[],
   StorageLocations[],
   Assets[],
-  PropertyPhotos[]
+  PropertyPhotos[],
+  Fixtures[],
+  AssetPhotos[]
 }
 
 ImportPreviewDto {
