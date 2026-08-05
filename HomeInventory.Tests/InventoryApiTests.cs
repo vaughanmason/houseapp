@@ -45,8 +45,12 @@ public sealed class InventoryApiTests
         var property = await propertyResponse.Content.ReadFromJsonAsync<PropertyDto>();
         Assert.NotNull(property);
 
+        var floorResponse = await client.PostAsJsonAsync($"/api/properties/{property.Id}/floors", new FloorInput(property.Id, "Main Floor", null));
+        var floor = await floorResponse.Content.ReadFromJsonAsync<FloorDto>();
+        Assert.NotNull(floor);
+
         var roomResponse = await client.PostAsJsonAsync("/api/rooms", new RoomInput(
-            property.Id,
+            floor.Id,
             "Kitchen",
             "Kitchen",
             10m,
@@ -68,10 +72,10 @@ public sealed class InventoryApiTests
         Assert.Equal(HttpStatusCode.Created, roomResponse.StatusCode);
         var room = await roomResponse.Content.ReadFromJsonAsync<RoomDto>();
         Assert.NotNull(room);
-        Assert.Equal(property.Id, room.PropertyId);
+        Assert.Equal(floor.Id, room.FloorId);
         Assert.Equal("Kitchen", room.Name);
 
-        var listResponse = await client.GetAsync($"/api/rooms?propertyId={property.Id}");
+        var listResponse = await client.GetAsync($"/api/rooms?floorId={floor.Id}");
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
         var rooms = await listResponse.Content.ReadFromJsonAsync<List<RoomDto>>();
         Assert.NotNull(rooms);
@@ -130,6 +134,8 @@ public sealed class InventoryApiTests
         var import = new InventoryExport(
             1,
             [new ImportProperty("prop-1", "Main House", "123 Main St", null, null, null, null)],
+            [],
+            [],
             [],
             [],
             [],

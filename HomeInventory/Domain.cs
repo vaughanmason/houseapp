@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeInventory;
 
-// TODO: Model floors, photos, documents, contacts, manufacturers, warranties, and paint as first-class entities.
 public sealed class Property
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -13,15 +12,26 @@ public sealed class Property
     public decimal? FloorArea { get; set; }
     public string? Notes { get; set; }
     public List<PropertyPhoto> Photos { get; set; } = [];
-    public List<Room> Rooms { get; set; } = [];
+    public List<Floor> Floors { get; set; } = [];
     public List<StorageLocation> StorageLocations { get; set; } = [];
     public List<Asset> Assets { get; set; } = [];
 }
-public sealed class Room
+
+public sealed class Floor
 {
-    // TODO: Add room area/volume and permanent details for surfaces, windows, doors, fixtures, and utilities.
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid PropertyId { get; set; }
+    public required string Name { get; set; }
+    public string? Notes { get; set; }
+    public Property? Property { get; set; }
+    public List<Room> Rooms { get; set; } = [];
+}
+
+public sealed class Room
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? PropertyId { get; set; }
+    public Guid? FloorId { get; set; }
     public required string Name { get; set; }
     public string? Type { get; set; }
     public decimal? Area { get; set; }
@@ -39,10 +49,38 @@ public sealed class Room
     public string? FixturesNotes { get; set; }
     public string? UtilitiesNotes { get; set; }
     public string? Notes { get; set; }
-    public Property? Property { get; set; }
+    public Floor? Floor { get; set; }
     public List<RoomPhoto> Photos { get; set; } = [];
     public List<RoomPaint> RoomPaints { get; set; } = [];
+    public List<Surface> Surfaces { get; set; } = [];
 }
+
+public sealed class Surface
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid RoomId { get; set; }
+    public required string Name { get; set; }
+    public required string SurfaceType { get; set; }
+    public string? PaintBrand { get; set; }
+    public string? ColorName { get; set; }
+    public string? ColorCode { get; set; }
+    public string? Finish { get; set; }
+    public int? Coats { get; set; }
+    public DateOnly? PaintedDate { get; set; }
+    public string? Painter { get; set; }
+    public decimal? QuantityPurchased { get; set; }
+    public string? Manufacturer { get; set; }
+    public string? ProductName { get; set; }
+    public string? Material { get; set; }
+    public string? Supplier { get; set; }
+    public string? Warranty { get; set; }
+    public string? Invoice { get; set; }
+    public DateOnly? InstallationDate { get; set; }
+    public string? Notes { get; set; }
+    public int SortOrder { get; set; }
+    public Room? Room { get; set; }
+}
+
 public sealed class Paint
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -53,6 +91,7 @@ public sealed class Paint
     public string? Notes { get; set; }
     public List<RoomPaint> RoomPaints { get; set; } = [];
 }
+
 public sealed class RoomPaint
 {
     public Guid RoomId { get; set; }
@@ -62,6 +101,7 @@ public sealed class RoomPaint
     public Room? Room { get; set; }
     public Paint? Paint { get; set; }
 }
+
 public sealed class PropertyPhoto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -71,6 +111,7 @@ public sealed class PropertyPhoto
     public int SortOrder { get; set; }
     public Property? Property { get; set; }
 }
+
 public sealed class RoomPhoto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -80,6 +121,7 @@ public sealed class RoomPhoto
     public int SortOrder { get; set; }
     public Room? Room { get; set; }
 }
+
 public sealed class StorageLocation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -90,9 +132,9 @@ public sealed class StorageLocation
     public Property? Property { get; set; }
     public StorageLocation? Parent { get; set; }
 }
+
 public sealed class Asset
 {
-    // TODO: Add barcode/QR, attachment, warranty, and immutable lifecycle-history records for assets.
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid PropertyId { get; set; }
     public Guid? RoomId { get; set; }
@@ -113,21 +155,39 @@ public sealed class Asset
     public Room? Room { get; set; }
     public StorageLocation? StorageLocation { get; set; }
 }
+
 public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : DbContext(options)
 {
-    // TODO: Add DbSets and relationship rules for the planned maintenance, paint, document, photo, and utility modules.
     public DbSet<Property> Properties => Set<Property>();
+    public DbSet<Floor> Floors => Set<Floor>();
     public DbSet<Room> Rooms => Set<Room>();
+    public DbSet<Surface> Surfaces => Set<Surface>();
     public DbSet<Paint> Paints => Set<Paint>();
     public DbSet<RoomPaint> RoomPaints => Set<RoomPaint>();
     public DbSet<PropertyPhoto> PropertyPhotos => Set<PropertyPhoto>();
     public DbSet<RoomPhoto> RoomPhotos => Set<RoomPhoto>();
     public DbSet<StorageLocation> StorageLocations => Set<StorageLocation>();
     public DbSet<Asset> Assets => Set<Asset>();
+
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Property>().Property(x => x.Name).HasMaxLength(160).IsRequired();
+        model.Entity<Floor>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Room>().Property(x => x.Name).HasMaxLength(160).IsRequired();
+        model.Entity<Surface>().Property(x => x.Name).HasMaxLength(160).IsRequired();
+        model.Entity<Surface>().Property(x => x.SurfaceType).HasMaxLength(40).IsRequired();
+        model.Entity<Surface>().Property(x => x.PaintBrand).HasMaxLength(120);
+        model.Entity<Surface>().Property(x => x.ColorName).HasMaxLength(120);
+        model.Entity<Surface>().Property(x => x.ColorCode).HasMaxLength(80);
+        model.Entity<Surface>().Property(x => x.Finish).HasMaxLength(80);
+        model.Entity<Surface>().Property(x => x.Painter).HasMaxLength(120);
+        model.Entity<Surface>().Property(x => x.Manufacturer).HasMaxLength(120);
+        model.Entity<Surface>().Property(x => x.ProductName).HasMaxLength(160);
+        model.Entity<Surface>().Property(x => x.Material).HasMaxLength(120);
+        model.Entity<Surface>().Property(x => x.Supplier).HasMaxLength(160);
+        model.Entity<Surface>().Property(x => x.Warranty).HasMaxLength(160);
+        model.Entity<Surface>().Property(x => x.Invoice).HasMaxLength(240);
+        model.Entity<Surface>().Property(x => x.Notes).HasMaxLength(800);
         model.Entity<Paint>().Property(x => x.Brand).HasMaxLength(120).IsRequired();
         model.Entity<Paint>().Property(x => x.ColorName).HasMaxLength(120).IsRequired();
         model.Entity<Paint>().Property(x => x.ColorCode).HasMaxLength(80);
@@ -142,7 +202,9 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<StorageLocation>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Asset>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         model.Entity<Asset>().Property(x => x.Category).HasMaxLength(100).IsRequired();
-        model.Entity<Room>().HasOne(x => x.Property).WithMany(x => x.Rooms).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<Floor>().HasOne(x => x.Property).WithMany(x => x.Floors).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<Room>().HasOne(x => x.Floor).WithMany(x => x.Rooms).HasForeignKey(x => x.FloorId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<Surface>().HasOne(x => x.Room).WithMany(x => x.Surfaces).HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<PropertyPhoto>().HasOne(x => x.Property).WithMany(x => x.Photos).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<RoomPhoto>().HasOne(x => x.Room).WithMany(x => x.Photos).HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<RoomPaint>().HasOne(x => x.Room).WithMany(x => x.RoomPaints).HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Cascade);

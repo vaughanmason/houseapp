@@ -1,47 +1,61 @@
 # Home Inventory
 
-Local-only household inventory built with ASP.NET Core Minimal APIs, EF Core/SQLite, and Blazor WebAssembly. Tracks properties → rooms → nested storage locations (cabinets/drawers) → assets with valuation dashboard, search, archive toggle, photo metadata registry, paint color library assignments by surface area (walls/flooring), document attachments for receipts/warranties, maintenance schedules, utilities/fixtures notes per room, JSON export/import backups using external IDs to prevent re-import collisions.
+Local-only property management app built with ASP.NET Core Minimal APIs, EF Core/SQLite, and Blazor WebAssembly. The current data model is a property-centric hierarchy of Property → Floor → Room → Surface, with nested storage locations, assets, dashboard metrics, photo metadata, room paint assignments, and JSON export/import backups.
 
 ## Run locally
 
 ```powershell
+dotnet restore .\HomeInventory.sln
+dotnet build .\HomeInventory.sln
 dotnet run --project .\HomeInventory
 ```
 
-Open the localhost URL shown by the application. The database lives in `%LOCALAPPDATA%\HomeInventory\inventory.db`; it is intentionally outside the repository. Use **Import & backup** → JSON export to download a portable backup, then restore via Import Preview → Confirm workflow.
+Open the localhost URL shown by the application. The database lives in `%LOCALAPPDATA%\HomeInventory\inventory.db`; it is intentionally outside the repository. If you want a clean slate when upgrading from earlier builds, delete that file and restart the app—the app will recreate it and apply the latest migrations.
 
-## Features
+## What’s implemented
 
 - Properties with address/purchase metadata
-- Rooms: name/type (bedroom/bath), area/volume measurements, surface finish notes for paint/fixture tracking, window/door counts, utilities/fixtures notes fields ready for normalization
-- Standalone Paint library + room-specific wall/flooring/color assignments via registry-first approach  
-- Nested storage location hierarchy with server-computed paths (`Parent → Child`) per property (cabinet/drawer/shelf trees)
-- Assets: name/category (furniture/electronics/etc), brand/model/serial numbers, purchase price/current value depreciation tracking, condition ratings, archive toggle instead of hard-delete
-- Photo metadata registry for external blob storage references with captions/sort order on properties and rooms  
-- Dashboard summary metrics + category totals  
-- Text search across asset names/categories/brands/SNs  
+- Floors owned by properties
+- Rooms owned by floors with area/volume, finish notes, window/door counts, utilities/fixtures notes, and paint assignments
+- Surfaces attached to rooms with type-based metadata (wall, ceiling, flooring, trim)
+- Nested storage location hierarchy with server-computed paths (`Parent → Child`) per property
+- Assets with categories, brand/model/serial numbers, valuation, condition, and archive toggle
+- Photo metadata registry for external storage references on properties and rooms
+- Dashboard summary metrics and category totals
+- Text search across asset names/categories/brands/serial numbers
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 
 ## API Endpoints (`/api`)
 
 | Resource | Methods | Notes |
 |----------|---------|-------|
-| Properties | GET, POST, PUT/{id} | Ownership boundary for rooms/assets hierarchy |
-| Rooms | GET by property, POST, PUT/{id}, DELETE via UI flag? | Surface notes ready for paint/fixtures modules |
-| Paints (library) | GET/POST/DELETE paints; `rooms/{roomId}/paints` assign to walls/floors with sort order/surface type badges | Registry-first approach then room-specific mappings |
+| Properties | GET, POST, PUT/{id} | Ownership boundary for floors/assets hierarchy |
+| Floors | GET/POST/PUT/DELETE under properties or `/floors` | Floors belong to a property and own rooms |
+| Rooms | GET by floor/property, POST, PUT/{id}, DELETE | Rooms now live under floors |
+| Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
+| Paints (library) | GET/POST/PUT/DELETE paints; `rooms/{roomId}/paints` assign colours to room surfaces | Registry-first approach with room-specific mappings |
 | StorageLocations | GET by property, POST/PUT tree edits | Self-referencing hierarchy scoped per property |
-| Assets | GET list/filter/archive?, CRUD, MOVE location endpoint, archive toggle only | Cross-entity validation enforced everywhere (no orphan references) |
+| Assets | GET list/filter/archive, CRUD, move endpoint, archive toggle | Cross-entity validation is enforced for property/floor/room references |
 
 ## Import Contract (`schemaVersion: 1`)
 
 ```csharp
-InventoryExport { Properties[], Rooms[], StorageLocations[], Assets[] } // all nested by externalId references, not database IDs; skip archived on export/confirm
-ImportPreviewDto { IsValid, Errors[], Counts..., DuplicateExternalIds[] }  // preview before confirm transactional import skipping duplicates by name + location equality checks
+InventoryExport {
+  Properties[],
+  Floors[],
+  Rooms[],
+  Surfaces[],
+  StorageLocations[],
+  Assets[],
+  PropertyPhotos[]
+}
+
+ImportPreviewDto {
+  IsValid,
+  Errors[],
+  Counts...,
+  DuplicateExternalIds[]
+}
 ```
 
-## TODO: Upcoming Modules (Pending Implementation)
-
-- **Floors**: floorplan sketches/photos per room  
-- **Surfaces/Fixtures**: window/door specs normalize into dedicated fixtures table, mounted on rooms entity notes fields pending normalization  
-- **Maintenance schedules**, warranties, documents repository for receipts/warranties attachments  
-- Paint swatches/thumbnails, color matching API endpoints, maintenance due date notifications
+All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation.

@@ -86,10 +86,20 @@
 <div class="row g-4">
     <div class="col-lg-5">
         <div class="card card-body">
-            <h2 class="h4">Add room</h2>
-            <select class="form-select mb-2" @bind="roomPropertyId">
+            <h2 class="h4">Add floor</h2>
+            <select class="form-select mb-2" @bind="floorPropertyId">
                 <option value="">Choose property</option>
                 @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            <input class="form-control mb-2" @bind="floorName" placeholder="Floor name" />
+            <textarea class="form-control mb-2" @bind="floorNotes" placeholder="Notes"></textarea>
+            <button class="btn btn-outline-primary" @onclick="AddFloor">Save floor</button>
+        </div>
+        <div class="card card-body mt-3">
+            <h2 class="h4">Add room</h2>
+            <select class="form-select mb-2" @bind="roomFloorId">
+                <option value="">Choose floor</option>
+                @foreach (var floor in floors) { <option value="@floor.Id">@GetFloorLabel(floor)</option> }
             </select>
             <input class="form-control mb-2" @bind="roomName" placeholder="Room name" />
             <input class="form-control mb-2" @bind="roomType" placeholder="Type (e.g. Bedroom)" />
@@ -124,9 +134,9 @@
                 <li class="list-group-item">
                     @if (editingRoomId == r.Id)
                     {
-                        <select class="form-select mb-2" @bind="editRoomPropertyId">
-                            <option value="">Choose property</option>
-                            @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+                        <select class="form-select mb-2" @bind="editRoomFloorId">
+                            <option value="">Choose floor</option>
+                            @foreach (var floor in floors) { <option value="@floor.Id">@GetFloorLabel(floor)</option> }
                         </select>
                         <input class="form-control mb-2" @bind="editRoomName" />
                         <input class="form-control mb-2" @bind="editRoomType" />
@@ -160,11 +170,44 @@
                         <strong>@r.Name</strong> <span class="text-muted">@r.Type</span>
                         <div class="small text-muted">Area: @FormatNumber(r.Area) · Volume: @FormatNumber(r.Volume) · Ceiling: @FormatNumber(r.CeilingHeight)</div>
                         <div class="small text-muted mb-2">Flooring: @r.Flooring · Wall: @r.WallFinish · Ceiling: @r.CeilingFinish</div>
+                        <div class="small text-muted">Floor: @GetFloorLabel(r.FloorId)</div>
                         <button class="btn btn-outline-primary btn-sm" @onclick="() => StartRoomEdit(r)">Edit</button>
                     }
                 </li>
             }
         </ul>
+    </div>
+</div>
+
+<hr class="my-4" />
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card card-body">
+            <h2 class="h4">Surfaces</h2>
+            <select class="form-select mb-2" @bind="surfaceRoomId" @bind:after="LoadSurfaces">
+                <option value="">Choose room</option>
+                @foreach (var room in rooms) { <option value="@room.Id">@room.Name</option> }
+            </select>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="surfaceName" placeholder="Surface name" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="surfaceType" placeholder="Type (wall, ceiling, flooring, trim)" /></div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" @bind="surfaceSortOrder" type="number" placeholder="Sort order" /></div>
+                <div class="col-md-6"><input class="form-control" @bind="surfaceNotes" placeholder="Notes" /></div>
+            </div>
+            <button class="btn btn-outline-primary mb-3" @onclick="AddSurface">Add surface</button>
+            <ul class="list-group">
+                @foreach (var surface in surfaces)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><strong>@surface.Name</strong> <span class="text-muted">@surface.SurfaceType</span></span>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurface(surface.Id)">Delete</button>
+                    </li>
+                }
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -238,25 +281,29 @@
 
 @code {
     List<PropertyDto> properties = [];
+    List<FloorDto> floors = [];
     List<RoomDto> rooms = [];
     List<PaintDto> paints = [];
     List<RoomPaintDto> roomPaints = [];
     List<PhotoMetadataDto> propertyPhotos = [];
+    List<SurfaceDto> surfaces = [];
 
     string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyNotes = "";
     string propertyPhotoPropertyId = "", propertyPhotoStorageKey = "", propertyPhotoCaption = "", propertyPhotoSortOrder = "0";
-    string roomPropertyId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "", roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "", roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
+    string floorPropertyId = "", floorName = "", floorNotes = "";
+    string roomFloorId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "", roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "", roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
 
     Guid? editingPropertyId;
     string editPropertyName = "", editPropertyAddress = "", editPropertyPurchaseDate = "", editPropertyPurchasePrice = "", editPropertyFloorArea = "", editPropertyNotes = "";
 
     Guid? editingRoomId;
-    string editRoomPropertyId = "", editRoomName = "", editRoomType = "", editRoomArea = "", editRoomVolume = "", editRoomCeilingHeight = "", editRoomLength = "", editRoomWidth = "", editRoomHeight = "", editRoomFlooring = "", editRoomWallFinish = "", editRoomCeilingFinish = "", editRoomWindowsCount = "", editRoomDoorsCount = "", editRoomFixturesNotes = "", editRoomUtilitiesNotes = "", editRoomNotes = "";
+    string editRoomFloorId = "", editRoomName = "", editRoomType = "", editRoomArea = "", editRoomVolume = "", editRoomCeilingHeight = "", editRoomLength = "", editRoomWidth = "", editRoomHeight = "", editRoomFlooring = "", editRoomWallFinish = "", editRoomCeilingFinish = "", editRoomWindowsCount = "", editRoomDoorsCount = "", editRoomFixturesNotes = "", editRoomUtilitiesNotes = "", editRoomNotes = "";
 
     Guid? editingPaintId;
     string paintBrand = "", paintColorName = "", paintColorCode = "", paintFinish = "", paintNotes = "";
 
     string roomPaintRoomId = "", roomPaintPaintId = "", roomPaintSurface = "", roomPaintSortOrder = "0";
+    string surfaceRoomId = "", surfaceName = "", surfaceType = "", surfaceSortOrder = "0", surfaceNotes = "";
     string? error;
 
     protected override async Task OnInitializedAsync() => await Load();
@@ -264,6 +311,7 @@
     async Task Load()
     {
         properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
         paints = await Http.GetFromJsonAsync<List<PaintDto>>("api/paints") ?? [];
         if (string.IsNullOrWhiteSpace(propertyPhotoPropertyId) && properties.Count > 0)
@@ -290,13 +338,24 @@
         await Load();
     }
 
+    async Task AddFloor()
+    {
+        error = null;
+        if (!Guid.TryParse(floorPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        var response = await Http.PostAsJsonAsync($"api/properties/{propertyId}/floors", new FloorInput(propertyId, floorName, floorNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        floorName = floorNotes = "";
+        await Load();
+    }
+
     async Task AddRoom()
     {
         error = null;
-        if (!Guid.TryParse(roomPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
-        var response = await Http.PostAsJsonAsync("api/rooms", new RoomInput(propertyId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
+        if (!Guid.TryParse(roomFloorId, out var floorId)) { error = "Choose a floor first."; return; }
+        var response = await Http.PostAsJsonAsync("api/rooms", new RoomInput(floorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         roomName = roomType = roomArea = roomVolume = roomCeilingHeight = roomLength = roomWidth = roomHeight = roomFlooring = roomWallFinish = roomCeilingFinish = roomWindowsCount = roomDoorsCount = roomFixturesNotes = roomUtilitiesNotes = roomNotes = "";
+        roomFloorId = "";
         await Load();
     }
 
@@ -325,7 +384,7 @@
     void StartRoomEdit(RoomDto room)
     {
         editingRoomId = room.Id;
-        editRoomPropertyId = room.PropertyId.ToString();
+        editRoomFloorId = room.FloorId.ToString();
         editRoomName = room.Name;
         editRoomType = room.Type ?? "";
         editRoomArea = room.Area?.ToString() ?? "";
@@ -349,8 +408,8 @@
     async Task SaveRoomEdit(Guid id)
     {
         error = null;
-        if (!Guid.TryParse(editRoomPropertyId, out var propertyId)) { error = "Choose a valid property for the room."; return; }
-        var response = await Http.PutAsJsonAsync($"api/rooms/{id}", new RoomInput(propertyId, editRoomName, editRoomType, TryDecimal(editRoomArea), TryDecimal(editRoomVolume), TryDecimal(editRoomCeilingHeight), TryDecimal(editRoomLength), TryDecimal(editRoomWidth), TryDecimal(editRoomHeight), editRoomFlooring, editRoomWallFinish, editRoomCeilingFinish, null, TryInt(editRoomWindowsCount), TryInt(editRoomDoorsCount), editRoomFixturesNotes, editRoomUtilitiesNotes, editRoomNotes));
+        if (!Guid.TryParse(editRoomFloorId, out var floorId)) { error = "Choose a valid floor for the room."; return; }
+        var response = await Http.PutAsJsonAsync($"api/rooms/{id}", new RoomInput(floorId, editRoomName, editRoomType, TryDecimal(editRoomArea), TryDecimal(editRoomVolume), TryDecimal(editRoomCeilingHeight), TryDecimal(editRoomLength), TryDecimal(editRoomWidth), TryDecimal(editRoomHeight), editRoomFlooring, editRoomWallFinish, editRoomCeilingFinish, null, TryInt(editRoomWindowsCount), TryInt(editRoomDoorsCount), editRoomFixturesNotes, editRoomUtilitiesNotes, editRoomNotes));
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingRoomId = null;
         await Load();
@@ -449,6 +508,43 @@
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         await LoadPropertyPhotos();
     }
+
+    async Task LoadSurfaces()
+    {
+        surfaces = [];
+        if (!Guid.TryParse(surfaceRoomId, out var roomId)) return;
+        surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
+    }
+
+    async Task AddSurface()
+    {
+        error = null;
+        if (!Guid.TryParse(surfaceRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        if (string.IsNullOrWhiteSpace(surfaceName)) { error = "Surface name is required."; return; }
+        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/surfaces", new SurfaceInput(roomId, surfaceName, string.IsNullOrWhiteSpace(surfaceType) ? "wall" : surfaceType, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, surfaceNotes, TryInt(surfaceSortOrder) ?? 0));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        surfaceName = surfaceType = "";
+        surfaceSortOrder = "0";
+        surfaceNotes = "";
+        await LoadSurfaces();
+    }
+
+    async Task DeleteSurface(Guid surfaceId)
+    {
+        error = null;
+        if (!Guid.TryParse(surfaceRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        var response = await Http.DeleteAsync($"api/surfaces/{surfaceId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await LoadSurfaces();
+    }
+
+    string GetFloorLabel(FloorDto floor)
+    {
+        var property = properties.FirstOrDefault(x => x.Id == floor.PropertyId);
+        return property is null ? floor.Name : $"{property.Name} · {floor.Name}";
+    }
+
+    string GetFloorLabel(Guid? floorId) => floorId is null ? "-" : (floors.FirstOrDefault(x => x.Id == floorId.Value)?.Name is { Length: > 0 } name ? name : "-");
 
     static DateOnly? TryDate(string value) => DateOnly.TryParse(value, out var parsed) ? parsed : (DateOnly?)null;
     static decimal? TryDecimal(string value) => decimal.TryParse(value, out var parsed) ? parsed : (decimal?)null;
