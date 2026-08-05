@@ -1,6 +1,6 @@
 namespace HomeInventory.Client;
 
-public sealed record PropertyDto(Guid Id, string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes);
+public sealed record PropertyDto(Guid Id, string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes, string Currency = "USD");
 public sealed record FloorDto(Guid Id, Guid PropertyId, string Name, string? Notes);
 public sealed record RoomDto(Guid Id, Guid FloorId, string Name, string? Type, decimal? Area, decimal? Volume, decimal? CeilingHeight, decimal? Length, decimal? Width, decimal? Height, string? Flooring, string? WallFinish, string? CeilingFinish, string? PaintDetails, int? WindowsCount, int? DoorsCount, string? FixturesNotes, string? UtilitiesNotes, string? Notes);
 public sealed record SurfaceDto(Guid Id, Guid RoomId, string Name, string SurfaceType, string? PaintBrand, string? ColorName, string? ColorCode, string? Finish, int? Coats, DateOnly? PaintedDate, string? Painter, decimal? QuantityPurchased, string? Manufacturer, string? ProductName, string? Material, string? Supplier, string? Warranty, string? Invoice, DateOnly? InstallationDate, string? Notes, int SortOrder);
@@ -12,11 +12,11 @@ public sealed record RoomPaintDto(Guid PaintId, string Brand, string ColorName, 
 public sealed record StorageLocationDto(Guid Id, Guid PropertyId, Guid? ParentId, string Name, string? Type, string Path);
 public sealed record AssetDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? StorageLocationId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes, bool IsArchived, string? LocationPath);
 public sealed record AssetPhotoDto(Guid Id, string StorageKey, string? Caption, int SortOrder);
-public sealed record DashboardDto(int AssetCount, decimal TotalValue, IReadOnlyList<CategoryTotalDto> Categories, int FixtureCount, decimal FixtureValue);
+public sealed record DashboardDto(int AssetCount, decimal TotalValue, IReadOnlyList<CategoryTotalDto> Categories, int FixtureCount, decimal FixtureValue, string? Currency = null);
 public sealed record CategoryTotalDto(string Category, decimal Total);
 public sealed record SearchResultDto(string Kind, Guid Id, string Title, string Detail, string? LocationPath);
 
-public sealed record PropertyInput(string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes);
+public sealed record PropertyInput(string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes, string? Currency = null);
 public sealed record FloorInput(Guid PropertyId, string Name, string? Notes);
 public sealed record RoomInput(Guid FloorId, string Name, string? Type, decimal? Area, decimal? Volume, decimal? CeilingHeight, decimal? Length, decimal? Width, decimal? Height, string? Flooring, string? WallFinish, string? CeilingFinish, string? PaintDetails, int? WindowsCount, int? DoorsCount, string? FixturesNotes, string? UtilitiesNotes, string? Notes);
 public sealed record SurfaceInput(Guid RoomId, string Name, string SurfaceType, string? PaintBrand, string? ColorName, string? ColorCode, string? Finish, int? Coats, DateOnly? PaintedDate, string? Painter, decimal? QuantityPurchased, string? Manufacturer, string? ProductName, string? Material, string? Supplier, string? Warranty, string? Invoice, DateOnly? InstallationDate, string? Notes, int SortOrder);
@@ -31,7 +31,7 @@ public sealed record AssetInput(Guid PropertyId, Guid? RoomId, Guid? StorageLoca
 public sealed record AssetMoveInput(Guid? RoomId, Guid? StorageLocationId);
 
 public sealed record InventoryExport(int SchemaVersion, List<ImportProperty> Properties, List<ImportFloor> Floors, List<ImportRoom> Rooms, List<ImportSurface> Surfaces, List<ImportStorageLocation> StorageLocations, List<ImportAsset> Assets, List<ImportPropertyPhoto> PropertyPhotos, List<ImportFixture>? Fixtures = null, List<ImportAssetPhoto>? AssetPhotos = null);
-public sealed record ImportProperty(string ExternalId, string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes);
+public sealed record ImportProperty(string ExternalId, string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes, string? Currency = null);
 public sealed record ImportFloor(string ExternalId, string PropertyExternalId, string Name, string? Notes);
 public sealed record ImportPropertyPhoto(string ExternalId, string PropertyExternalId, string? StorageKey, string? Caption, int SortOrder);
 public sealed record ImportRoom(string ExternalId, string FloorExternalId, string Name, string? Type, decimal? Area, decimal? Volume, decimal? CeilingHeight, decimal? Length, decimal? Width, decimal? Height, string? Flooring, string? WallFinish, string? CeilingFinish, string? PaintDetails, int? WindowsCount, int? DoorsCount, string? FixturesNotes, string? UtilitiesNotes, string? Notes);

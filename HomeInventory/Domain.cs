@@ -10,6 +10,7 @@ public sealed class Property
     public DateOnly? PurchaseDate { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? FloorArea { get; set; }
+    public string Currency { get; set; } = "USD";
     public string? Notes { get; set; }
     public List<PropertyPhoto> Photos { get; set; } = [];
     public List<Floor> Floors { get; set; } = [];
@@ -221,6 +222,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Property>().Property(x => x.Name).HasMaxLength(160).IsRequired();
+        model.Entity<Property>().Property(x => x.Currency).HasMaxLength(3).HasDefaultValue("USD").IsRequired();
         model.Entity<Floor>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Room>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Surface>().Property(x => x.Name).HasMaxLength(160).IsRequired();

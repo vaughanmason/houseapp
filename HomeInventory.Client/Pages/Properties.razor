@@ -15,6 +15,14 @@
                 <div class="col-md-6"><input class="form-control" @bind="propertyPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
             </div>
             <input class="form-control mb-2" @bind="propertyFloorArea" type="number" step="0.01" placeholder="Floor area" />
+            <select class="form-select mb-2" @bind="propertyCurrency">
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="CAD">CAD</option>
+                <option value="AUD">AUD</option>
+                <option value="JPY">JPY</option>
+            </select>
             <textarea class="form-control mb-2" @bind="propertyNotes" placeholder="Notes"></textarea>
             <button class="btn btn-primary" @onclick="AddProperty">Save property</button>
         </div>
@@ -34,6 +42,14 @@
                             <div class="col-md-6"><input class="form-control" @bind="editPropertyPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
                         </div>
                         <input class="form-control mb-2" @bind="editPropertyFloorArea" type="number" step="0.01" placeholder="Floor area" />
+                        <select class="form-select mb-2" @bind="editPropertyCurrency">
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                            <option value="CAD">CAD</option>
+                            <option value="AUD">AUD</option>
+                            <option value="JPY">JPY</option>
+                        </select>
                         <textarea class="form-control mb-2" @bind="editPropertyNotes"></textarea>
                         <div class="d-flex gap-2">
                             <button class="btn btn-success btn-sm" @onclick="() => SavePropertyEdit(p.Id)">Save</button>
@@ -44,7 +60,7 @@
                     {
                         <strong>@p.Name</strong>
                         <div class="text-muted">@p.Address</div>
-                        <div class="small text-muted">Purchased: @FormatDate(p.PurchaseDate) · Price: @FormatMoney(p.PurchasePrice) · Floor area: @FormatNumber(p.FloorArea)</div>
+                        <div class="small text-muted">Purchased: @FormatDate(p.PurchaseDate) · Price: @FormatMoney(p.PurchasePrice, p.Currency) · Floor area: @FormatNumber(p.FloorArea)</div>
                         <div class="small mb-2">@p.Notes</div>
                         <button class="btn btn-outline-primary btn-sm" @onclick="() => StartPropertyEdit(p)">Edit</button>
                     }
@@ -260,7 +276,7 @@
                 @foreach (var fixture in fixtures)
                 {
                     <li class="list-group-item d-flex justify-content-between align-items-start">
-                        <span><strong>@fixture.Name</strong> <span class="text-muted">@fixture.Type</span><br /><span class="small text-muted">@fixture.Manufacturer @fixture.Model</span></span>
+                        <span><strong>@fixture.Name</strong> <span class="text-muted">@fixture.Type</span><br /><span class="small text-muted">@fixture.Manufacturer @fixture.Model</span><br /><span class="small text-muted">Purchase: @FormatMoney(fixture.PurchasePrice, GetPropertyCurrencyForFixture(fixture)) · Current: @FormatMoney(fixture.CurrentValue, GetPropertyCurrencyForFixture(fixture))</span></span>
                         <span>
                             <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartFixtureEdit(fixture)">Edit</button>
                             <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFixture(fixture.Id)">Delete</button>
@@ -335,7 +351,7 @@
                 @foreach (var asset in assets)
                 {
                     <li class="list-group-item d-flex justify-content-between align-items-start">
-                        <span><strong>@asset.Name</strong> <span class="text-muted">@asset.Category</span><br /><span class="small text-muted">@asset.LocationPath</span></span>
+                        <span><strong>@asset.Name</strong> <span class="text-muted">@asset.Category</span><br /><span class="small text-muted">@asset.LocationPath</span><br /><span class="small text-muted">Purchase: @FormatMoney(asset.PurchasePrice, GetPropertyCurrency(asset.PropertyId)) · Current: @FormatMoney(asset.CurrentValue, GetPropertyCurrency(asset.PropertyId))</span></span>
                         <span>
                             <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartAssetEdit(asset)">Edit</button>
                             <button class="btn btn-sm btn-outline-warning me-1" @onclick="() => ArchiveAsset(asset.Id)">Archive</button>
@@ -452,13 +468,13 @@
     List<AssetDto> assets = [];
     List<AssetPhotoDto> assetPhotos = [];
 
-    string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyNotes = "";
+    string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyCurrency = "USD", propertyNotes = "";
     string propertyPhotoPropertyId = "", propertyPhotoStorageKey = "", propertyPhotoCaption = "", propertyPhotoSortOrder = "0";
     string floorPropertyId = "", floorName = "", floorNotes = "";
     string roomFloorId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "", roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "", roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
 
     Guid? editingPropertyId;
-    string editPropertyName = "", editPropertyAddress = "", editPropertyPurchaseDate = "", editPropertyPurchasePrice = "", editPropertyFloorArea = "", editPropertyNotes = "";
+    string editPropertyName = "", editPropertyAddress = "", editPropertyPurchaseDate = "", editPropertyPurchasePrice = "", editPropertyFloorArea = "", editPropertyCurrency = "USD", editPropertyNotes = "";
 
     Guid? editingRoomId;
     string editRoomFloorId = "", editRoomName = "", editRoomType = "", editRoomArea = "", editRoomVolume = "", editRoomCeilingHeight = "", editRoomLength = "", editRoomWidth = "", editRoomHeight = "", editRoomFlooring = "", editRoomWallFinish = "", editRoomCeilingFinish = "", editRoomWindowsCount = "", editRoomDoorsCount = "", editRoomFixturesNotes = "", editRoomUtilitiesNotes = "", editRoomNotes = "";
@@ -533,9 +549,10 @@
     async Task AddProperty()
     {
         error = null;
-        var response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes));
+        var response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         propertyName = propertyAddress = propertyPurchaseDate = propertyPurchasePrice = propertyFloorArea = propertyNotes = "";
+        propertyCurrency = "USD";
         await Load();
     }
 
@@ -568,6 +585,7 @@
         editPropertyPurchaseDate = property.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
         editPropertyPurchasePrice = property.PurchasePrice?.ToString() ?? "";
         editPropertyFloorArea = property.FloorArea?.ToString() ?? "";
+        editPropertyCurrency = property.Currency ?? "USD";
         editPropertyNotes = property.Notes ?? "";
     }
 
@@ -576,7 +594,7 @@
     async Task SavePropertyEdit(Guid id)
     {
         error = null;
-        var response = await Http.PutAsJsonAsync($"api/properties/{id}", new PropertyInput(editPropertyName, editPropertyAddress, TryDate(editPropertyPurchaseDate), TryDecimal(editPropertyPurchasePrice), TryDecimal(editPropertyFloorArea), editPropertyNotes));
+        var response = await Http.PutAsJsonAsync($"api/properties/{id}", new PropertyInput(editPropertyName, editPropertyAddress, TryDate(editPropertyPurchaseDate), TryDecimal(editPropertyPurchasePrice), TryDecimal(editPropertyFloorArea), editPropertyNotes, editPropertyCurrency));
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingPropertyId = null;
         await Load();
@@ -930,6 +948,19 @@
     static decimal? TryDecimal(string value) => decimal.TryParse(value, out var parsed) ? parsed : (decimal?)null;
     static int? TryInt(string value) => int.TryParse(value, out var parsed) ? parsed : (int?)null;
     static string FormatDate(DateOnly? value) => value?.ToString("yyyy-MM-dd") ?? "-";
-    static string FormatMoney(decimal? value) => value?.ToString("C") ?? "-";
+    string GetPropertyCurrency(Guid? propertyId) => properties.FirstOrDefault(x => x.Id == propertyId)?.Currency ?? "USD";
+    string GetPropertyCurrencyForFixture(FixtureDto fixture)
+    {
+        var room = rooms.FirstOrDefault(x => x.Id == fixture.RoomId);
+        if (room is null) return "USD";
+        var floor = floors.FirstOrDefault(x => x.Id == room.FloorId);
+        return GetPropertyCurrency(floor?.PropertyId);
+    }
+    static string FormatMoney(decimal? value, string? currencyCode = null)
+    {
+        if (value is null) return "-";
+        var currency = string.IsNullOrWhiteSpace(currencyCode) ? "USD" : currencyCode.Trim().ToUpperInvariant();
+        return $"{currency} {value.Value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
+    }
     static string FormatNumber(decimal? value) => value?.ToString("0.##") ?? "-";
 }

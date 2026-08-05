@@ -14,7 +14,7 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 
 ## What’s implemented
 
-- Properties with address/purchase metadata
+- Properties with address/purchase metadata and a configurable property-level currency (USD, EUR, GBP, etc.)
 - Floors owned by properties
 - Rooms owned by floors with area/volume, finish notes, window/door counts, utilities/fixtures notes, and paint assignments
 - Surfaces attached to rooms with type-based metadata (wall, ceiling, flooring, trim)
@@ -64,4 +64,4 @@ ImportPreviewDto {
 }
 ```
 
-All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation.
+All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.

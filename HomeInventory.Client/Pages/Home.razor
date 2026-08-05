@@ -1,5 +1,6 @@
 @page "/"
 @inject HttpClient Http
+@using System.Globalization
 
 <PageTitle>Home inventory</PageTitle>
 <h1>Home inventory</h1>
@@ -7,12 +8,12 @@
 @if (dashboard is null) { <p>Loading your inventory…</p> }
 else
 {
-    <div class="row g-3 mb-4"><div class="col-md-6"><div class="card p-3"><div class="text-muted">Active assets</div><strong class="display-6">@dashboard.AssetCount</strong></div></div><div class="col-md-6"><div class="card p-3"><div class="text-muted">Current insured value</div><strong class="display-6">@dashboard.TotalValue.ToString("C")</strong></div></div></div>
+    <div class="row g-3 mb-4"><div class="col-md-6"><div class="card p-3"><div class="text-muted">Active assets</div><strong class="display-6">@dashboard.AssetCount</strong></div></div><div class="col-md-6"><div class="card p-3"><div class="text-muted">Current insured value</div><strong class="display-6">@FormatMoney(dashboard.TotalValue, dashboard.Currency)</strong></div></div></div>
     <h2>Value by category</h2>
     @if (dashboard.Categories.Count == 0) { <p>No assets yet. <a href="assets">Add your first asset</a>.</p> }
-    else { <table class="table"><thead><tr><th>Category</th><th class="text-end">Value</th></tr></thead><tbody>@foreach (var category in dashboard.Categories) { <tr><td>@category.Category</td><td class="text-end">@category.Total.ToString("C")</td></tr> }</tbody></table> }
+    else { <table class="table"><thead><tr><th>Category</th><th class="text-end">Value</th></tr></thead><tbody>@foreach (var category in dashboard.Categories) { <tr><td>@category.Category</td><td class="text-end">@FormatMoney(category.Total, dashboard.Currency)</td></tr> }</tbody></table> }
 }
 <h2 class="mt-5">Find anything</h2>
 <div class="input-group"><input class="form-control" @bind="query" @bind:event="oninput" placeholder="Search assets or storage…" /><button class="btn btn-primary" @onclick="Search">Search</button></div>
 @if (results is not null) { <ul class="list-group mt-3">@foreach (var item in results) { <li class="list-group-item"><strong>@item.Title</strong> <span class="text-muted">@item.Kind · @item.Detail @item.LocationPath</span></li> }</ul> }
-@code { DashboardDto? dashboard; string query = ""; List<SearchResultDto>? results; protected override async Task OnInitializedAsync() => dashboard = await Http.GetFromJsonAsync<DashboardDto>("api/dashboard"); async Task Search() => results = string.IsNullOrWhiteSpace(query) ? [] : await Http.GetFromJsonAsync<List<SearchResultDto>>($"api/search?q={Uri.EscapeDataString(query)}"); }
+@code { DashboardDto? dashboard; string query = ""; List<SearchResultDto>? results; protected override async Task OnInitializedAsync() => dashboard = await Http.GetFromJsonAsync<DashboardDto>("api/dashboard"); async Task Search() => results = string.IsNullOrWhiteSpace(query) ? [] : await Http.GetFromJsonAsync<List<SearchResultDto>>($"api/search?q={Uri.EscapeDataString(query)}"); static string FormatMoney(decimal? value, string? currencyCode = null) { if (value is null) return "-"; var currency = string.IsNullOrWhiteSpace(currencyCode) ? "USD" : currencyCode.Trim().ToUpperInvariant(); return $"{currency} {value.Value.ToString("0.00", CultureInfo.InvariantCulture)}"; } }

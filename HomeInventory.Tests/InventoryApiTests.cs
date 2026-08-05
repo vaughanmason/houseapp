@@ -19,13 +19,15 @@ public sealed class InventoryApiTests
             new DateOnly(2024, 1, 1),
             250000m,
             2000m,
-            "Primary residence"));
+            "Primary residence",
+            "EUR"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<PropertyDto>();
         Assert.NotNull(created);
         Assert.Equal("Main House", created.Name);
         Assert.Equal("123 Main St", created.Address);
+        Assert.Equal("EUR", created.Currency);
 
         var listResponse = await client.GetAsync("/api/properties");
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
@@ -180,7 +182,7 @@ public sealed class InventoryApiTests
 
         var import = new InventoryExport(
             1,
-            [new ImportProperty("prop-1", "Main House", "123 Main St", null, null, null, null)],
+            [new ImportProperty("prop-1", "Main House", "123 Main St", null, null, null, null, "GBP")],
             [],
             [],
             [],
@@ -202,6 +204,7 @@ public sealed class InventoryApiTests
         var properties = await propertyResponse.Content.ReadFromJsonAsync<List<PropertyDto>>();
         Assert.NotNull(properties);
         Assert.Single(properties);
+        Assert.Equal("GBP", properties[0].Currency);
 
         var photosResponse = await client.GetAsync($"/api/properties/{properties[0].Id}/photos");
         Assert.Equal(HttpStatusCode.OK, photosResponse.StatusCode);
