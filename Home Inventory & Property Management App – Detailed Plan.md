@@ -28,10 +28,13 @@ Property
 
 ```
 Everything belongs somewhere.  
+
+Implementation status (current): Modules 1–4 are implemented and validated in the app. Modules 5–17 remain planned for future work.  
   
 ⸻  
   
 ## Module 1 – Properties  
+Status: Implemented. Property CRUD, photo metadata, and property-scoped relationships are now available in the API, UI, tests, and documentation.
 Support multiple properties.  
 Examples  
 ```
@@ -53,6 +56,7 @@ Fields
 ⸻  
   
 ## Module 2 – Floors  
+Status: Implemented. Floors are now created under properties, exposed through the API/UI, and backed by EF migrations.
 ```
 Ground Floor
 First Floor
@@ -64,6 +68,7 @@ Garage
 ⸻  
   
 ## Module 3 – Rooms  
+Status: Implemented. Rooms now belong to floors, support the documented metadata, and are available through the API/UI with related paint assignments.
 Every room stores permanent information.  
 Example  
 ```
@@ -96,6 +101,7 @@ Doors
 ⸻  
   
 ## Module 4 – Surfaces  
+Status: Implemented. Surfaces are now attached to rooms with type-based metadata and can be managed in the UI and API.
 ## Walls  
 Store  
 * Paint Brand  
