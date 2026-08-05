@@ -43,3 +43,5 @@ app.MapRazorComponents<App>()
 app.MapInventoryApi();
 
 app.Run();
+
+public partial class Program;
