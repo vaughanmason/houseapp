@@ -53,16 +53,11 @@ Resolved on 2026-10-04: property delete (blocked while it has assets, with a typ
 - Files uploaded but never attached (form abandoned) stay on disk, so a periodic orphan sweep would reclaim them.
 - No image thumbnails are generated; full-size images are scaled in the browser. HEIC photos can be stored but most browsers can't display them.
 - Maintenance service records can't carry photos directly. Attach a document to the task instead.
-- Windows Application Control blocked the freshly built `HomeInventory.exe` on this machine, so the app had to run via `dotnet HomeInventory.dll`. Setting `<UseAppHost>false</UseAppHost>` would make `dotnet run` avoid the exe.
-- Most nav-menu icon classes (`bi-tools-nav-menu`, `bi-palette-nav-menu`, and others) have no CSS rule, so those menu items show no icon. Only house, list, plus and calendar are defined in `NavMenu.razor.css`.
-- `/api/search` and the asset/fixture DTO helpers load whole tables into memory. That's fine at household scale, but it won't scale.
-- `AssetDtos`, `ValidateAsset` and the import confirm handler are still dense one-liners. Split them when you touch them.
-- Test coverage: 37 API tests.
-- Asset history starts when this feature shipped: assets created before 2026-10-04 have no "Added" event, and edits to fields other than location (e.g. value) aren't logged automatically. Use a manual "Valued" entry. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
-- No `.editorconfig` or extra analyzers.
+- Test coverage: 40 API tests, but no UI (bUnit/Playwright) tests.
+- Asset history starts when this feature shipped: assets created before 2026-10-04 have no "Added" event, and edits to fields other than location (e.g. value) aren't logged automatically. Use a manual "Valued" entry.
 - The product plan suggests Flutter/offline-first and cloud sync. The current implementation is Blazor WASM, local-only. That needs a deliberate decision before multi-device work starts.
 
-Resolved: the template pages, placeholder test and stale TODO were removed, GitHub Actions CI was added (build with `-warnaserror` + tests), the model snapshot and the `dotnet-ef` local tool were added, the unused server `FormatMoney` and the duplicate on the Home page were removed, the CS8602 warning was fixed (the build is warning-free), `Export`/`Preview` were made readable, and `.github/copilot-instructions.md` was brought up to date.
+Resolved: nav icons for every menu item, `.editorconfig` plus .NET analyzers at `latest-recommended` (findings fixed, CI fails on new ones), `UseAppHost=false` so `dotnet run` avoids the blocked exe, search filtering in SQL, readable asset and location helpers (location paths no longer recurse), tests for paint CRUD and the property/room photo endpoints, the template pages, placeholder test and stale TODO were removed, GitHub Actions CI was added (build with `-warnaserror` + tests), the model snapshot and the `dotnet-ef` local tool were added, the unused server `FormatMoney` and the duplicate on the Home page were removed, the CS8602 warning was fixed (the build is warning-free), `Export`/`Preview` were made readable, and `.github/copilot-instructions.md` was brought up to date.
 
 ## Suggested order
 

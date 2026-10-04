@@ -25,8 +25,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Development");
         builder.ConfigureServices(services =>
         {
-            services.RemoveAll(typeof(DbContextOptions<InventoryDbContext>));
-            services.RemoveAll(typeof(InventoryDbContext));
+            services.RemoveAll<DbContextOptions<InventoryDbContext>>();
+            services.RemoveAll<InventoryDbContext>();
             services.AddSingleton(_connection);
             services.RemoveAll<FileStore>();
             services.AddSingleton(new FileStore(FilesPath));

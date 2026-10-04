@@ -9,6 +9,7 @@ dotnet restore .\HomeInventory.sln
 dotnet tool restore   # dotnet-ef, for migrations
 dotnet build .\HomeInventory.sln
 dotnet run --project .\HomeInventory
+dotnet test .\HomeInventory.Tests
 ```
 
 Open the localhost URL shown by the application. The database lives in `%LOCALAPPDATA%\HomeInventory\inventory.db`; it is intentionally outside the repository. If you want a clean slate when upgrading from earlier builds, delete that file and restart the app—the app will recreate it and apply the latest migrations.

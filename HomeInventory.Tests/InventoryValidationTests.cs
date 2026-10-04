@@ -878,6 +878,71 @@ public sealed class InventoryValidationTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/assets/{Guid.NewGuid()}")).StatusCode);
     }
 
+    [Fact]
+    public async Task Search_IsCaseInsensitiveAndTreatsWildcardsLiterally()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        await CreateAssetAsync(client, property.Id, null, null, "Cordless DRILL");
+        await CreateAssetAsync(client, property.Id, null, null, "100% wool rug");
+        await CreateAssetAsync(client, property.Id, null, null, "1000 wool rug");
+        var archived = await CreateAssetAsync(client, property.Id, null, null, "Old drill");
+        await client.PostAsync($"/api/assets/{archived.Id}/archive", null);
+
+        var drills = await client.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=drill");
+        Assert.Equal("Cordless DRILL", Assert.Single(drills!).Title); // archived assets are not searched
+        var percent = await client.GetFromJsonAsync<List<SearchResultDto>>($"/api/search?q={Uri.EscapeDataString("100%")}");
+        Assert.Equal("100% wool rug", Assert.Single(percent!).Title);
+        Assert.Empty((await client.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=%20"))!);
+    }
+
+    [Fact]
+    public async Task Paints_CrudAndAssignmentRules()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var room = await CreateRoomAsync(client, (await CreateFloorAsync(client, property.Id)).Id);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/paints", new PaintInput(" ", "White", null, null, null))).StatusCode);
+        var paint = (await (await client.PostAsJsonAsync("/api/paints", new PaintInput(" Dulux ", "Oyster White", "OW-104", null, null))).Content.ReadFromJsonAsync<PaintDto>())!;
+        Assert.Equal("Dulux", paint.Brand);
+        var updated = (await (await client.PutAsJsonAsync($"/api/paints/{paint.Id}", new PaintInput("Dulux", "Oyster White", "OW-104", "Matt", "Lounge colour"))).Content.ReadFromJsonAsync<PaintDto>())!;
+        Assert.Equal(("Matt", "Lounge colour"), (updated.Finish, updated.Notes));
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/rooms/{room.Id}/paints", new RoomPaintInput(paint.Id, 0, "Walls"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/rooms/{room.Id}/paints", new RoomPaintInput(paint.Id, 1, "Again"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/rooms/{room.Id}/paints", new RoomPaintInput(Guid.NewGuid(), 0, null))).StatusCode);
+        var assignments = (await (await client.PutAsJsonAsync($"/api/rooms/{room.Id}/paints/{paint.Id}", new RoomPaintInput(paint.Id, 2, "Feature wall"))).Content.ReadFromJsonAsync<List<RoomPaintDto>>())!;
+        Assert.Equal("Feature wall", Assert.Single(assignments).Surface);
+
+        // Deleting a paint removes its room assignments.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/paints/{paint.Id}")).StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<List<RoomPaintDto>>($"/api/rooms/{room.Id}/paints"))!);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/paints/{paint.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task PropertyAndRoomPhotos_UpdateAndDelete()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var room = await CreateRoomAsync(client, (await CreateFloorAsync(client, property.Id)).Id);
+
+        foreach (var endpoint in new[] { $"/api/properties/{property.Id}/photos", $"/api/rooms/{room.Id}/photos" })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(endpoint, new PhotoMetadataInput(" ", null, 0))).StatusCode);
+            var photo = (await (await client.PostAsJsonAsync(endpoint, new PhotoMetadataInput("a.jpg", "Before", 1))).Content.ReadFromJsonAsync<PhotoMetadataDto>())!;
+            var updated = (await (await client.PutAsJsonAsync($"{endpoint}/{photo.Id}", new PhotoMetadataInput("b.jpg", "After", 2))).Content.ReadFromJsonAsync<PhotoMetadataDto>())!;
+            Assert.Equal(("b.jpg", "After", 2), (updated.StorageKey, updated.Caption, updated.SortOrder));
+            Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"{endpoint}/{photo.Id}")).StatusCode);
+            Assert.Empty((await client.GetFromJsonAsync<List<PhotoMetadataDto>>(endpoint))!);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"{endpoint}/{photo.Id}")).StatusCode);
+        }
+    }
+
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };

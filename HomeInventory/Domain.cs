@@ -324,8 +324,9 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<AssetEvent> AssetEvents => Set<AssetEvent>();
 
-    protected override void OnModelCreating(ModelBuilder model)
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var model = modelBuilder;
         model.Entity<Property>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Property>().Property(x => x.Currency).HasMaxLength(3).HasDefaultValue("USD").IsRequired();
         model.Entity<Floor>().Property(x => x.Name).HasMaxLength(160).IsRequired();

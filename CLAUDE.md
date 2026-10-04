@@ -17,8 +17,8 @@ dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQ
 ```
 
 - Target framework is `net10.0` (SDK 10.x). CI (`.github/workflows/ci.yml`) runs restore, a Release build with `-warnaserror`, and the tests on every push or PR to `master`.
-- The build is warning-free. Keep it that way.
-- If Windows Application Control / Smart App Control blocks the freshly built `HomeInventory.exe`, run it through the dotnet host instead: from `HomeInventory\`, `$env:ASPNETCORE_ENVIRONMENT="Development"; dotnet bin\Debug\net10.0\HomeInventory.dll --urls http://localhost:5068`.
+- The build is warning-free with .NET analyzers at `latest-recommended` (`Directory.Build.props`), and CI uses `-warnaserror`. `.editorconfig` holds the style settings and the two deliberate rule suppressions (CA1716 for entity names, CA1707 for xUnit test names). Use culture-invariant string APIs (`StringComparison.Ordinal*`, `ToLowerInvariant`).
+- `UseAppHost` is false, so the host runs through `dotnet HomeInventory.dll`. Windows Application Control on the dev machine blocks the freshly built `HomeInventory.exe`.
 - Running the app creates or migrates the real local database at `%LOCALAPPDATA%\HomeInventory\inventory.db`. Tests never touch it.
 
 ## Architecture
@@ -26,6 +26,7 @@ dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQ
 - `HomeInventory` is the ASP.NET Core host. `Program.cs` registers SQLite, runs `Database.MigrateAsync()` on startup, serves the Blazor WebAssembly client through `Components/App.razor`, and calls `app.MapInventoryApi()`. `public partial class Program;` exists so `WebApplicationFactory<Program>` can be used in tests.
 - `HomeInventory\Domain.cs` holds every EF entity plus `InventoryDbContext` (constraints and relationships live in `OnModelCreating`).
 - `HomeInventory\InventoryApi.cs` is the **entire** `/api` surface: one consolidated minimal-API module with static `ToDto`/`*Dtos` helpers at the bottom. Keep that style; don't introduce controllers, services or MediatR.
+- Search (`/api/search`) filters in SQL with `EF.Functions.Like` (escaping `%`, `_` and `\`). Only storage locations are matched in memory, because their paths are computed.
 - External package: `QRCoder` (MIT) generates label QR codes as SVG (`GET /api/qr`). Everything else uses the ASP.NET Core and EF Core packages.
 - `HomeInventory.Client` is the interactive WASM UI. Pages in `Pages/` call relative `api/...` URLs with an injected `HttpClient`. Shared components live in `Components/` (`CurrencyDisplay`, `Breadcrumb`, `ConfirmDialog` with optional `ChildContent`/`ConfirmDisabled`, `PropertySelector`). Use `CurrencyDisplay` for money; don't add new formatting helpers.
 - `HomeInventory.Client\Contracts.cs` holds **all** wire records (DTOs, `*Input`, `Import*`, `InventoryExport`). The server consumes them through its project reference. Keep these, `InventoryApi.cs`, and the client pages in sync.

@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- .NET code analysis at the "recommended" level; CI builds with -warnaserror so new findings fail the build. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+</Project>

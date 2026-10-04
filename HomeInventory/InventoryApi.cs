@@ -800,28 +800,39 @@ public static class InventoryApi
         api.MapGet("/search", async (string? q, InventoryDbContext db) =>
         {
             if (string.IsNullOrWhiteSpace(q)) return Results.Ok(Array.Empty<SearchResultDto>());
-            var term = q.Trim().ToLower();
-            var assets = await AssetDtos(db, null, false);
-            var fixtures = await FixtureDtos(db, db.Fixtures.AsQueryable());
-            var locations = await LocationDtos(db, null);
-            var roomPaths = await RoomPaths(db);
-            var paints = await db.Paints.ToListAsync();
-            var surfaces = await db.Surfaces.ToListAsync();
+            var term = q.Trim();
+            // SQLite LIKE is case-insensitive for ASCII; % and _ in the search text are matched literally.
+            var pattern = $"%{term.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal)}%";
+            const int Limit = 50;
+
+            var assets = await AssetDtos(db, db.Assets.Where(x => !x.IsArchived && (EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.Category, pattern, "\\")
+                || EF.Functions.Like(x.Brand, pattern, "\\") || EF.Functions.Like(x.Model, pattern, "\\") || EF.Functions.Like(x.SerialNumber, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\"))).Take(Limit));
+            var fixtures = await FixtureDtos(db, db.Fixtures.Where(x => EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.Type, pattern, "\\") || EF.Functions.Like(x.Manufacturer, pattern, "\\")
+                || EF.Functions.Like(x.Model, pattern, "\\") || EF.Functions.Like(x.SerialNumber, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\") || EF.Functions.Like(x.Provider, pattern, "\\")).Take(Limit));
+            // Location paths are computed, so locations (a small table) are matched in memory.
+            var locations = (await LocationDtos(db, null)).Where(x => $"{x.Name} {x.Type} {x.Path}".Contains(term, StringComparison.OrdinalIgnoreCase)).Take(Limit).ToList();
+            var paints = await db.Paints.Where(x => EF.Functions.Like(x.Brand, pattern, "\\") || EF.Functions.Like(x.ColorName, pattern, "\\") || EF.Functions.Like(x.ColorCode, pattern, "\\")
+                || EF.Functions.Like(x.Finish, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\")).Take(Limit).ToListAsync();
+            var surfaces = await db.Surfaces.Where(x => EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.SurfaceType, pattern, "\\") || EF.Functions.Like(x.PaintBrand, pattern, "\\")
+                || EF.Functions.Like(x.ColorName, pattern, "\\") || EF.Functions.Like(x.ColorCode, pattern, "\\") || EF.Functions.Like(x.Finish, pattern, "\\") || EF.Functions.Like(x.Material, pattern, "\\")
+                || EF.Functions.Like(x.Manufacturer, pattern, "\\") || EF.Functions.Like(x.ProductName, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\")).Take(Limit).ToListAsync();
+            var documents = await DocumentDtos(db, db.Documents.Where(x => EF.Functions.Like(x.Title, pattern, "\\") || EF.Functions.Like(x.Kind, pattern, "\\") || EF.Functions.Like(x.Tags, pattern, "\\")
+                || EF.Functions.Like(x.Notes, pattern, "\\") || EF.Functions.Like(x.FileName, pattern, "\\")).Take(Limit));
+
+            var roomPaths = surfaces.Count > 0 ? await RoomPaths(db) : [];
             var paintResults = new List<SearchResultDto>();
-            foreach (var paint in paints.Where(x => $"{x.Brand} {x.ColorName} {x.ColorCode} {x.Finish} {x.Notes}".ToLower().Contains(term)))
+            foreach (var paint in paints)
             {
                 var usedIn = (await PaintUsage(db, paint)).Select(x => x.RoomPath).Distinct().ToList();
                 paintResults.Add(new SearchResultDto("Paint", paint.Id, $"{paint.Brand} {paint.ColorName}", string.Join(" ", new[] { paint.ColorCode, paint.Finish }.Where(x => !string.IsNullOrWhiteSpace(x))), usedIn.Count == 0 ? null : string.Join(", ", usedIn)));
             }
-            var surfaceResults = surfaces.Where(x => $"{x.Name} {x.SurfaceType} {x.PaintBrand} {x.ColorName} {x.ColorCode} {x.Finish} {x.Material} {x.Manufacturer} {x.ProductName} {x.Notes}".ToLower().Contains(term))
-                .Select(x => new SearchResultDto("Surface", x.Id, x.Name, string.Join(" · ", new[] { x.SurfaceType, x.SurfaceType == "flooring" ? x.Material : x.PaintBrand, x.ColorName }.Where(y => !string.IsNullOrWhiteSpace(y))), roomPaths.GetValueOrDefault(x.RoomId)));
-            var documents = await DocumentDtos(db, db.Documents);
-            var documentResults = documents.Where(x => $"{x.Title} {x.Kind} {x.Tags} {x.Notes} {x.FileName}".ToLower().Contains(term))
-                .Select(x => new SearchResultDto("Document", x.Id, x.Title, x.Kind, x.AttachedTo ?? x.PropertyName));
-            var results = assets.Where(x => $"{x.Name} {x.Category} {x.Brand} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Asset", x.Id, x.Name, x.Category, x.LocationPath))
-                .Concat(fixtures.Where(x => $"{x.Name} {x.Type} {x.Manufacturer} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Fixture", x.Id, x.Name, x.Type, x.LocationPath)))
-                .Concat(locations.Where(x => $"{x.Name} {x.Type} {x.Path}".ToLower().Contains(term)).Select(x => new SearchResultDto("Storage", x.Id, x.Name, x.Type ?? "Storage location", x.Path)))
-                .Concat(paintResults).Concat(surfaceResults).Concat(documentResults).Take(50);
+            var results = assets.Select(x => new SearchResultDto("Asset", x.Id, x.Name, x.Category, x.LocationPath))
+                .Concat(fixtures.Select(x => new SearchResultDto("Fixture", x.Id, x.Name, x.Type, x.LocationPath)))
+                .Concat(locations.Select(x => new SearchResultDto("Storage", x.Id, x.Name, x.Type ?? "Storage location", x.Path)))
+                .Concat(paintResults)
+                .Concat(surfaces.Select(x => new SearchResultDto("Surface", x.Id, x.Name, string.Join(" · ", new[] { x.SurfaceType, x.SurfaceType == "flooring" ? x.Material : x.PaintBrand, x.ColorName }.Where(y => !string.IsNullOrWhiteSpace(y))), roomPaths.GetValueOrDefault(x.RoomId))))
+                .Concat(documents.Select(x => new SearchResultDto("Document", x.Id, x.Title, x.Kind, x.AttachedTo ?? x.PropertyName)))
+                .Take(Limit);
             return Results.Ok(results);
         });
 
@@ -873,7 +884,7 @@ public static class InventoryApi
                 if (inventory is null) return Results.BadRequest("The backup's inventory.json is empty.");
                 int restored = 0, skipped = 0;
                 // Only entries named files/<valid key> are considered, so crafted paths can't escape the files folder.
-                foreach (var entry in zip.Entries.Where(x => x.FullName.StartsWith("files/")))
+                foreach (var entry in zip.Entries.Where(x => x.FullName.StartsWith("files/", StringComparison.Ordinal)))
                 {
                     await using var content = entry.Open();
                     if (await store.RestoreAsync(entry.FullName["files/".Length..], content, entry.Length)) restored++; else skipped++;
@@ -1076,7 +1087,12 @@ public static class InventoryApi
             .ThenBy(x => x.ColorName)
             .Select(x => new RoomPaintDto(x.Id, x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes, x.SortOrder, x.Surface))
             .ToListAsync();
-    static async Task<List<StorageLocationDto>> LocationDtos(InventoryDbContext db, Guid? propertyId) { var list = await db.StorageLocations.Where(x => propertyId == null || x.PropertyId == propertyId).ToListAsync(); return list.Select(x => new StorageLocationDto(x.Id, x.PropertyId, x.ParentId, x.Name, x.Type, Path(x, list))).OrderBy(x => x.Path).ToList(); }
+    static async Task<List<StorageLocationDto>> LocationDtos(InventoryDbContext db, Guid? propertyId)
+    {
+        var list = await db.StorageLocations.Where(x => propertyId == null || x.PropertyId == propertyId).ToListAsync();
+        var byId = list.ToDictionary(x => x.Id);
+        return list.Select(x => new StorageLocationDto(x.Id, x.PropertyId, x.ParentId, x.Name, x.Type, Path(x, byId))).OrderBy(x => x.Path).ToList();
+    }
     static readonly string[] IntervalUnits = ["days", "months", "years"];
     static DateOnly Today() => DateOnly.FromDateTime(DateTime.Today);
     /// <summary>Next due date after a completion; null for one-off tasks, which are finished once done.</summary>
@@ -1224,7 +1240,23 @@ public static class InventoryApi
         var list = await query.OrderBy(x => x.Name).ToListAsync();
         return list.Select(x => ToDto(x, rooms.TryGetValue(x.RoomId, out var path) ? path : null)).ToList();
     }
-    static async Task<List<AssetDto>> AssetDtos(InventoryDbContext db, Guid? propertyId, bool archived) { var locations = await LocationDtos(db, propertyId); var roomNames = await db.Rooms.Where(x => propertyId == null || x.Floor != null && x.Floor.PropertyId == propertyId).ToDictionaryAsync(x => x.Id, x => x.Name); var list = await db.Assets.Where(x => (propertyId == null || x.PropertyId == propertyId) && x.IsArchived == archived).ToListAsync(); return list.OrderBy(x => x.Name).Select(x => new AssetDto(x.Id,x.PropertyId,x.RoomId,x.StorageLocationId,x.Name,x.Category,x.Description,x.Brand,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Condition,x.Notes,x.IsArchived,x.StorageLocationId is not null ? locations.SingleOrDefault(l => l.Id == x.StorageLocationId)?.Path : x.RoomId is not null && roomNames.TryGetValue(x.RoomId.Value, out var n) ? n : null)).ToList(); }
+    static Task<List<AssetDto>> AssetDtos(InventoryDbContext db, Guid? propertyId, bool archived) =>
+        AssetDtos(db, db.Assets.Where(x => (propertyId == null || x.PropertyId == propertyId) && x.IsArchived == archived));
+    static async Task<List<AssetDto>> AssetDtos(InventoryDbContext db, IQueryable<Asset> assets)
+    {
+        var list = await assets.ToListAsync();
+        if (list.Count == 0) return [];
+        var propertyIds = list.Select(x => x.PropertyId).Distinct().ToList();
+        var locationPaths = (await db.StorageLocations.Where(x => propertyIds.Contains(x.PropertyId)).ToListAsync()) is var locations
+            ? locations.ToDictionary(x => x.Id, x => Path(x, locations.ToDictionary(y => y.Id))) : [];
+        var roomNames = await db.Rooms.Where(x => propertyIds.Contains(x.PropertyId)).ToDictionaryAsync(x => x.Id, x => x.Name);
+        string? LocationPath(Asset x) =>
+            x.StorageLocationId is Guid location ? locationPaths.GetValueOrDefault(location) :
+            x.RoomId is Guid room ? roomNames.GetValueOrDefault(room) : null;
+        return list.OrderBy(x => x.Name)
+            .Select(x => new AssetDto(x.Id, x.PropertyId, x.RoomId, x.StorageLocationId, x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes, x.IsArchived, LocationPath(x)))
+            .ToList();
+    }
     static async Task<bool> IsDescendant(InventoryDbContext db, Guid candidateId, Guid ancestorId)
     {
         var parents = await db.StorageLocations.ToDictionaryAsync(x => x.Id, x => x.ParentId);
@@ -1233,10 +1265,48 @@ public static class InventoryApi
             if (current == ancestorId) return true;
         return false;
     }
-    static string Path(StorageLocation item, List<StorageLocation> all) => item.ParentId is null ? item.Name : $"{Path(all.Single(x => x.Id == item.ParentId), all)} → {item.Name}";
-    static async Task<string?> ValidateAsset(AssetInput input, InventoryDbContext db) { if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Category)) return "Asset name and category are required."; if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return "The selected property does not exist."; if (input.RoomId is not null && input.StorageLocationId is not null) return "Choose either a room or a storage location, not both."; if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == input.PropertyId)) return "Room must be in the selected property."; if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == input.PropertyId)) return "Storage location must be in the selected property."; return null; }
-    static Asset NewAsset(AssetInput x) { var a = new Asset { Name = "", Category = "" }; Apply(x, a); return a; }
-    static void Apply(AssetInput x, Asset a) { a.PropertyId=x.PropertyId;a.RoomId=x.RoomId;a.StorageLocationId=x.StorageLocationId;a.Name=x.Name.Trim();a.Category=x.Category.Trim();a.Description=x.Description?.Trim();a.Brand=x.Brand?.Trim();a.Model=x.Model?.Trim();a.SerialNumber=x.SerialNumber?.Trim();a.PurchaseDate=x.PurchaseDate;a.PurchasePrice=x.PurchasePrice;a.CurrentValue=x.CurrentValue;a.Condition=x.Condition?.Trim();a.Notes=x.Notes?.Trim(); }
+    // "Parent → Child" display path; the visited set stops at a corrupt parent cycle instead of recursing forever.
+    static string Path(StorageLocation item, IReadOnlyDictionary<Guid, StorageLocation> all)
+    {
+        var names = new List<string>();
+        var visited = new HashSet<Guid>();
+        for (var current = item; current is not null && visited.Add(current.Id); current = current.ParentId is Guid parent ? all.GetValueOrDefault(parent) : null)
+            names.Add(current.Name);
+        names.Reverse();
+        return string.Join(" → ", names);
+    }
+    static async Task<string?> ValidateAsset(AssetInput input, InventoryDbContext db)
+    {
+        if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Category)) return "Asset name and category are required.";
+        if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return "The selected property does not exist.";
+        if (input.RoomId is not null && input.StorageLocationId is not null) return "Choose either a room or a storage location, not both.";
+        if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.PropertyId == input.PropertyId)) return "Room must be in the selected property.";
+        if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == input.PropertyId)) return "Storage location must be in the selected property.";
+        return null;
+    }
+    static Asset NewAsset(AssetInput input)
+    {
+        var asset = new Asset { Name = "", Category = "" };
+        Apply(input, asset);
+        return asset;
+    }
+    static void Apply(AssetInput x, Asset a)
+    {
+        a.PropertyId = x.PropertyId;
+        a.RoomId = x.RoomId;
+        a.StorageLocationId = x.StorageLocationId;
+        a.Name = x.Name.Trim();
+        a.Category = x.Category.Trim();
+        a.Description = x.Description?.Trim();
+        a.Brand = x.Brand?.Trim();
+        a.Model = x.Model?.Trim();
+        a.SerialNumber = x.SerialNumber?.Trim();
+        a.PurchaseDate = x.PurchaseDate;
+        a.PurchasePrice = x.PurchasePrice;
+        a.CurrentValue = x.CurrentValue;
+        a.Condition = x.Condition?.Trim();
+        a.Notes = x.Notes?.Trim();
+    }
     static async Task<InventoryExport> Export(InventoryDbContext db)
     {
         var props = await db.Properties.ToListAsync();
