@@ -230,6 +230,85 @@ public sealed class InventoryValidationTests
     }
 
     [Fact]
+    public async Task ImportSameBackupTwice_IsIdempotent_AndIncrementalBackupAddsOnlyNewRecords()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var floor = await CreateFloorAsync(source, property.Id);
+            var room = await CreateRoomAsync(source, floor.Id);
+            await source.PostAsJsonAsync($"/api/rooms/{room.Id}/surfaces", SurfaceFor(room.Id, "Wall", "wall"));
+            var fixture = await (await source.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id))).Content.ReadFromJsonAsync<FixtureDto>();
+            await source.PostAsJsonAsync($"/api/fixtures/{fixture!.Id}/photos", new FixturePhotoInput("sink.jpg", null, 0));
+            await source.PostAsJsonAsync($"/api/rooms/{room.Id}/photos", new PhotoMetadataInput("room.jpg", null, 0));
+            await source.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput("front.jpg", null, 0));
+            var paint = await (await source.PostAsJsonAsync("/api/paints", new PaintInput("Dulux", "Oyster White", null, null, null))).Content.ReadFromJsonAsync<PaintDto>();
+            await source.PostAsJsonAsync($"/api/rooms/{room.Id}/paints", new RoomPaintInput(paint!.Id, 0, null));
+            var garage = await CreateLocationAsync(source, property.Id, null, "Garage");
+            await CreateLocationAsync(source, property.Id, garage.Id, "Shelf");
+            var asset = await CreateAssetAsync(source, property.Id, room.Id, null, "Couch");
+            await source.PostAsJsonAsync($"/api/assets/{asset.Id}/photos", new AssetPhotoInput("couch.jpg", null, 0));
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
+        var afterFirst = (await target.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+
+        var preview = (await (await target.PostAsJsonAsync("/api/import/preview", backup)).Content.ReadFromJsonAsync<ImportPreviewDto>())!;
+        Assert.Equal(13, preview.ExistingRecords); // every record except the room-paint link, which has no backup ID of its own
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = preview.DuplicateExternalIds })).StatusCode);
+        var afterSecond = (await target.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        AssertSameIds(afterFirst, afterSecond);
+        AssertSameIds(backup, afterSecond); // backup IDs survive the restore
+
+        // A later backup with one extra room only adds that room, under the existing floor and property.
+        var newRoom = backup.Rooms[0] with { ExternalId = "room-new", Name = "Study" };
+        var incremental = backup with { Rooms = [.. backup.Rooms, newRoom] };
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = incremental, skipExternalIds = new List<string>() })).StatusCode);
+        var rooms = await target.GetFromJsonAsync<List<RoomDto>>("/api/rooms");
+        Assert.Equal(2, rooms!.Count);
+        var properties = await target.GetFromJsonAsync<List<PropertyDto>>("/api/properties");
+        Assert.Equal(2, (await target.GetFromJsonAsync<List<RoomDto>>($"/api/rooms?propertyId={Assert.Single(properties!).Id}"))!.Count);
+    }
+
+    [Fact]
+    public async Task Import_LocationsInAnyOrder_AndRejectsBadParents()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        InventoryExport ImportOf(params ImportStorageLocation[] locations) =>
+            new(1, [new ImportProperty("prop-1", "Main House", null, null, null, null, null)], [], [], [], [.. locations], [], []);
+
+        var childFirst = ImportOf(new ImportStorageLocation("box", "prop-1", "shelf", "Box", null), new ImportStorageLocation("shelf", "prop-1", "garage", "Shelf", null), new ImportStorageLocation("garage", "prop-1", null, "Garage", null));
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/import/confirm", new { inventory = childFirst, skipExternalIds = new List<string>() })).StatusCode);
+        var locations = await client.GetFromJsonAsync<List<StorageLocationDto>>("/api/locations");
+        Assert.Contains(locations!, x => x.Path == "Garage → Shelf → Box");
+
+        var missingParent = ImportOf(new ImportStorageLocation("box2", "prop-1", "nowhere", "Box", null));
+        var cycle = ImportOf(new ImportStorageLocation("a", "prop-1", "b", "A", null), new ImportStorageLocation("b", "prop-1", "a", "B", null));
+        foreach (var bad in new[] { missingParent, cycle })
+        {
+            var preview = (await (await client.PostAsJsonAsync("/api/import/preview", bad)).Content.ReadFromJsonAsync<ImportPreviewDto>())!;
+            Assert.False(preview.IsValid);
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/import/confirm", new { inventory = bad, skipExternalIds = new List<string>() })).StatusCode);
+        }
+    }
+
+    private static void AssertSameIds(InventoryExport expected, InventoryExport actual)
+    {
+        static IEnumerable<string> Ids(InventoryExport x) => x.Properties.Select(y => y.ExternalId).Concat(x.Floors.Select(y => y.ExternalId)).Concat(x.Rooms.Select(y => y.ExternalId))
+            .Concat(x.Surfaces.Select(y => y.ExternalId)).Concat(x.StorageLocations.Select(y => y.ExternalId)).Concat(x.Assets.Select(y => y.ExternalId))
+            .Concat(x.PropertyPhotos.Select(y => y.ExternalId)).Concat(x.Fixtures!.Select(y => y.ExternalId)).Concat(x.AssetPhotos!.Select(y => y.ExternalId))
+            .Concat(x.Paints!.Select(y => y.ExternalId)).Concat(x.RoomPaints!.Select(y => y.ExternalId)).Concat(x.RoomPhotos!.Select(y => y.ExternalId))
+            .Concat(x.FixturePhotos!.Select(y => y.ExternalId)).Order();
+        Assert.Equal(Ids(expected), Ids(actual));
+    }
+
+    [Fact]
     public async Task Assets_ArchiveAndUnarchive_NoHardDelete()
     {
         using var factory = new CustomWebApplicationFactory();

@@ -46,6 +46,8 @@ Property (Currency, Photos)
 
 Photos are metadata only (`StorageKey`, `Caption`, `SortOrder`). There is no file upload or storage.
 
+Every importable entity implements `IHasExternalId` (`Domain.cs`). `OnModelCreating` gives every implementer an indexed `ExternalId` (max 200) in one loop, so a new importable entity only needs the interface (plus a migration).
+
 ## Data and API conventions
 
 - A property is the ownership boundary. Rooms (through their floor), storage locations and assets must belong to the same property. Validate this in any new or changed endpoint (see `ValidateAsset` and the `/assets/{id}/move` handler for the pattern).
@@ -65,9 +67,9 @@ Photos are metadata only (`StorageKey`, `Caption`, `SortOrder`). There is no fil
 
 ## Import/export contract
 
-- Backups use `InventoryExport` with `schemaVersion: 1` and string external IDs (database GUIDs as strings, except for assets: see below). Children refer to parents through `*ExternalId` fields.
-- Exported: properties, floors, rooms, surfaces, storage locations, active assets (and their photos), property photos, fixtures, fixture photos, room photos, paints, room-paint assignments (external ID `"{roomId}:{paintId}"`, since the table has a composite key). On import, paints that match an existing paint (brand + colour name + code, case-insensitive) are reused, because the library is global.
-- The client always calls `POST /api/import/preview` before `POST /api/import/confirm` (`{ inventory, skipExternalIds }`). Confirm re-runs preview, then inserts everything in one transaction. Duplicate assets are flagged in preview by **external ID**: an import asset is a duplicate when an active asset has the same `Asset.ExternalId` (set on import) or the same database ID. The client passes those IDs back as `skipExternalIds`. Export writes `ExternalId ?? Id`, so IDs stay stable across backup → restore → backup cycles.
+- Backups use `InventoryExport` with `schemaVersion: 1` and string external IDs. Export writes `ExternalId ?? Id` for every record (`Ext()` in `Export`), and child references use the parent's exported ID, so backup → restore → backup cycles keep the same IDs. Children refer to parents through `*ExternalId` fields.
+- Exported: properties, floors, rooms, surfaces, storage locations, active assets (and their photos), property photos, fixtures, fixture photos, room photos, paints, room-paint assignments (external ID `"{roomId}:{paintId}"`, since the table has a composite key). The paint library is global, so imported paints that match an existing paint are reused.
+- The client always calls `POST /api/import/preview` before `POST /api/import/confirm` (`{ inventory, skipExternalIds }`). Confirm re-runs preview, then inserts everything in one transaction. Import is **idempotent by backup ID**. Confirm seeds each type's ID map with `ExistingIds()` (existing rows keyed by `ExternalId` and by database `Id`), skips any record already present, and attaches new children to existing parents. Restoring the same backup twice adds nothing, and a newer backup adds only new records. Preview reports `ExistingRecords` and lists matching assets in `DuplicateExternalIds` (still honoured as `skipExternalIds`). Paints also match on brand + colour name + code. Room-paint links are skipped when the room/paint pair exists. Storage locations are inserted parent-first, and preview rejects missing parents and cycles.
 - Every collection after `PropertyPhotos` (`Fixtures`, `AssetPhotos`, `Paints`, `RoomPaints`, `RoomPhotos`, `FixturePhotos`) is optional (nullable) on `InventoryExport` for backward compatibility. Keep new collections optional the same way. When you change the schema, update `Export`, `Preview` and the confirm handler together.
 
 ## When changing things

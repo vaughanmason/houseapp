@@ -2,9 +2,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HomeInventory;
 
-public sealed class Property
+/// <summary>Entities that can be exported and re-imported. ExternalId keeps the backup ID so restoring the same backup twice reuses existing rows.</summary>
+public interface IHasExternalId
+{
+    Guid Id { get; }
+    string? ExternalId { get; set; }
+}
+
+public sealed class Property : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public required string Name { get; set; }
     public string? Address { get; set; }
     public DateOnly? PurchaseDate { get; set; }
@@ -18,9 +26,10 @@ public sealed class Property
     public List<Asset> Assets { get; set; } = [];
 }
 
-public sealed class Floor
+public sealed class Floor : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid PropertyId { get; set; }
     public required string Name { get; set; }
     public string? Notes { get; set; }
@@ -28,9 +37,10 @@ public sealed class Floor
     public List<Room> Rooms { get; set; } = [];
 }
 
-public sealed class Room
+public sealed class Room : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid PropertyId { get; set; }
     public Guid? FloorId { get; set; }
     public required string Name { get; set; }
@@ -57,9 +67,10 @@ public sealed class Room
     public List<Fixture> Fixtures { get; set; } = [];
 }
 
-public sealed class Surface
+public sealed class Surface : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid RoomId { get; set; }
     public required string Name { get; set; }
     public required string SurfaceType { get; set; }
@@ -83,9 +94,10 @@ public sealed class Surface
     public Room? Room { get; set; }
 }
 
-public sealed class Paint
+public sealed class Paint : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public required string Brand { get; set; }
     public required string ColorName { get; set; }
     public string? ColorCode { get; set; }
@@ -104,9 +116,10 @@ public sealed class RoomPaint
     public Paint? Paint { get; set; }
 }
 
-public sealed class PropertyPhoto
+public sealed class PropertyPhoto : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid PropertyId { get; set; }
     public required string StorageKey { get; set; }
     public string? Caption { get; set; }
@@ -114,9 +127,10 @@ public sealed class PropertyPhoto
     public Property? Property { get; set; }
 }
 
-public sealed class RoomPhoto
+public sealed class RoomPhoto : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid RoomId { get; set; }
     public required string StorageKey { get; set; }
     public string? Caption { get; set; }
@@ -124,9 +138,10 @@ public sealed class RoomPhoto
     public Room? Room { get; set; }
 }
 
-public sealed class Fixture
+public sealed class Fixture : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid RoomId { get; set; }
     public required string Name { get; set; }
     public required string Type { get; set; }
@@ -148,9 +163,10 @@ public sealed class Fixture
     public List<FixturePhoto> Photos { get; set; } = [];
 }
 
-public sealed class FixturePhoto
+public sealed class FixturePhoto : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid FixtureId { get; set; }
     public required string StorageKey { get; set; }
     public string? Caption { get; set; }
@@ -158,9 +174,10 @@ public sealed class FixturePhoto
     public Fixture? Fixture { get; set; }
 }
 
-public sealed class StorageLocation
+public sealed class StorageLocation : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid PropertyId { get; set; }
     public Guid? ParentId { get; set; }
     public required string Name { get; set; }
@@ -169,9 +186,10 @@ public sealed class StorageLocation
     public StorageLocation? Parent { get; set; }
 }
 
-public sealed class Asset
+public sealed class Asset : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid PropertyId { get; set; }
     public Guid? RoomId { get; set; }
     public Guid? StorageLocationId { get; set; }
@@ -187,16 +205,16 @@ public sealed class Asset
     public string? Condition { get; set; }
     public string? Notes { get; set; }
     public bool IsArchived { get; set; }
-    public string? ExternalId { get; set; }
     public Property? Property { get; set; }
     public Room? Room { get; set; }
     public StorageLocation? StorageLocation { get; set; }
     public List<AssetPhoto> Photos { get; set; } = [];
 }
 
-public sealed class AssetPhoto
+public sealed class AssetPhoto : IHasExternalId
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
     public Guid AssetId { get; set; }
     public required string StorageKey { get; set; }
     public string? Caption { get; set; }
@@ -267,8 +285,6 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<StorageLocation>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Asset>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         model.Entity<Asset>().Property(x => x.Category).HasMaxLength(100).IsRequired();
-        model.Entity<Asset>().Property(x => x.ExternalId).HasMaxLength(200);
-        model.Entity<Asset>().HasIndex(x => x.ExternalId);
         model.Entity<AssetPhoto>().Property(x => x.StorageKey).HasMaxLength(512).IsRequired();
         model.Entity<AssetPhoto>().Property(x => x.Caption).HasMaxLength(240);
         model.Entity<Floor>().HasOne(x => x.Property).WithMany(x => x.Floors).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
@@ -287,6 +303,11 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<Asset>().HasOne(x => x.Property).WithMany(x => x.Assets).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Asset>().HasOne(x => x.Room).WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Asset>().HasOne(x => x.StorageLocation).WithMany().HasForeignKey(x => x.StorageLocationId).OnDelete(DeleteBehavior.Restrict);
+        foreach (var type in model.Model.GetEntityTypes().Select(x => x.ClrType).Where(typeof(IHasExternalId).IsAssignableFrom).ToList())
+        {
+            model.Entity(type).Property<string?>(nameof(IHasExternalId.ExternalId)).HasMaxLength(200);
+            model.Entity(type).HasIndex(nameof(IHasExternalId.ExternalId));
+        }
         model.Entity<AssetPhoto>().HasOne(x => x.Asset).WithMany(x => x.Photos).HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.Cascade);
     }
 }

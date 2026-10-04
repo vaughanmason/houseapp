@@ -27,12 +27,12 @@ None open.
 
 ## P2 – Functional gaps in the existing modules
 
-- **Import de-duplication only covers assets.** Importing the same backup twice still creates a second copy of its properties, floors, rooms, locations, fixtures and photos. Only assets (and their photos) are skipped. Full idempotent restore would need `ExternalId` on every imported entity, or a "replace everything" restore mode.
+- **Import doesn't merge edits.** Records that already exist are skipped, not updated, so restoring an older backup never overwrites newer data, but it also can't push field changes into existing records.
 - **Assets**: the search box on the Assets page only filters on the client (the Home page search uses the API).
 - **Reusable components**: `Breadcrumb` isn't used on any page. `PropertySelector`/`ConfirmDialog` are used only on some pages.
 - **Fixtures/assets** can't be moved between properties from the UI except through the asset edit form.
 
-Resolved on 2026-10-04: property delete (blocked while it has assets, with a typed-name confirm), surface add/edit with type-specific fields, room photo UI, storage location rename/re-parent, the asset Move picker, the "Used in" paint view (`GET /api/paints/{id}/usage`), search over paints and surfaces, and a Rooms-page bug where saving a room wiped its paint details.
+Resolved on 2026-10-04: property delete (blocked while it has assets, with a typed-name confirm), surface add/edit with type-specific fields, room photo UI, storage location rename/re-parent, the asset Move picker, the "Used in" paint view (`GET /api/paints/{id}/usage`), search over paints and surfaces, and a Rooms-page bug where saving a room wiped its paint details. Also resolved: imports are idempotent (`ExternalId` on every importable entity, migration `AddExternalIdsToImportedEntities`), and storage locations import in any order, with missing parents and cycles rejected.
 
 ## P3 – Planned modules not yet started (from the product plan)
 
@@ -55,7 +55,7 @@ Resolved on 2026-10-04: property delete (blocked while it has assets, with a typ
 - `Room.FloorId` is still nullable even though every room needs a floor. `Room.PropertyId` is denormalized from the floor and has to be kept in sync by the API.
 - `/api/search` and the asset/fixture DTO helpers load whole tables into memory. That's fine at household scale, but it won't scale.
 - `AssetDtos`, `ValidateAsset` and the import confirm handler are still dense one-liners. Split them when you touch them.
-- Test coverage: 20 API tests. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
+- Test coverage: 22 API tests. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
 - No `.editorconfig` or extra analyzers.
 - The product plan suggests Flutter/offline-first and cloud sync. The current implementation is Blazor WASM, local-only. That needs a deliberate decision before multi-device work starts.
 
@@ -64,7 +64,7 @@ Resolved: the template pages, placeholder test and stale TODO were removed, GitH
 ## Suggested order
 
 1. ~~Tidy-up and CI~~ (done).
-2. ~~Close the P2 UI gaps~~ (done). Next: backup IDs on every entity, so restoring the same backup twice is idempotent (agreed default).
+2. ~~Close the P2 UI gaps~~ (done). ~~Backup IDs on every entity~~ (done: imports are idempotent).
 3. Then start new modules, using the agreed defaults:
    - Documents/photos: real uploads stored under `%LOCALAPPDATA%\HomeInventory\files`, 20 MB limit, images and PDFs only.
    - Maintenance: tasks on fixtures, utilities or the property, recurring every N days/months/years, with the next due date calculated from the last service.

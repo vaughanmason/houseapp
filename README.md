@@ -92,4 +92,4 @@ ImportPreviewDto {
 }
 ```
 
-All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Assets remember their imported external ID, so re-importing the same file flags those assets as duplicates to skip. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.
+All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Every imported record remembers its backup ID, and exports reuse it. Restoring the same backup twice changes nothing, and restoring a newer backup only adds what is new. Storage locations may appear in any order. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.

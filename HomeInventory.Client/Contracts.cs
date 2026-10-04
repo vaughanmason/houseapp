@@ -46,4 +46,4 @@ public sealed record ImportPaint(string ExternalId, string Brand, string ColorNa
 public sealed record ImportRoomPaint(string ExternalId, string RoomExternalId, string PaintExternalId, int SortOrder, string? Surface);
 public sealed record ImportRoomPhoto(string ExternalId, string RoomExternalId, string? StorageKey, string? Caption, int SortOrder);
 public sealed record ImportFixturePhoto(string ExternalId, string FixtureExternalId, string? StorageKey, string? Caption, int SortOrder);
-public sealed record ImportPreviewDto(bool IsValid, IReadOnlyList<string> Errors, int Properties, int Floors, int Rooms, int Surfaces, int StorageLocations, int Assets, IReadOnlyList<string> DuplicateExternalIds, int Fixtures = 0, int Paints = 0, int Photos = 0);
+public sealed record ImportPreviewDto(bool IsValid, IReadOnlyList<string> Errors, int Properties, int Floors, int Rooms, int Surfaces, int StorageLocations, int Assets, IReadOnlyList<string> DuplicateExternalIds, int Fixtures = 0, int Paints = 0, int Photos = 0, int ExistingRecords = 0);
