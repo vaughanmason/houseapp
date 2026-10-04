@@ -62,9 +62,9 @@ Photos are metadata only (`StorageKey`, `Caption`, `SortOrder`). There is no fil
 ## Import/export contract
 
 - Backups use `InventoryExport` with `schemaVersion: 1` and string external IDs (the export uses database GUIDs as strings). Children refer to parents through `*ExternalId` fields.
-- Exported: properties, floors, rooms, surfaces, storage locations, active assets, property photos, fixtures, asset photos. **Not exported:** paints, room-paint assignments, room photos, fixture photos.
+- Exported: properties, floors, rooms, surfaces, storage locations, active assets (and their photos), property photos, fixtures, fixture photos, room photos, paints, room-paint assignments (external ID `"{roomId}:{paintId}"`, since the table has a composite key). On import, paints that match an existing paint (brand + colour name + code, case-insensitive) are reused, because the library is global.
 - The client always calls `POST /api/import/preview` before `POST /api/import/confirm` (`{ inventory, skipExternalIds }`). Confirm re-runs preview, then inserts everything in one transaction. Duplicate assets are flagged in preview by matching **name + location path** against existing active assets, and the client passes those IDs back as `skipExternalIds`.
-- `Fixtures` and `AssetPhotos` are optional (nullable) on `InventoryExport` for backward compatibility. Keep new collections optional the same way. When you change the schema, update `Export`, `Preview` and the confirm handler together.
+- Every collection after `PropertyPhotos` (`Fixtures`, `AssetPhotos`, `Paints`, `RoomPaints`, `RoomPhotos`, `FixturePhotos`) is optional (nullable) on `InventoryExport` for backward compatibility. Keep new collections optional the same way. When you change the schema, update `Export`, `Preview` and the confirm handler together.
 
 ## When changing things
 

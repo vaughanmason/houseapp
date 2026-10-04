@@ -33,6 +33,5 @@ The server launch profile uses `https://localhost:7060` and `http://localhost:50
 
 ## Import/export contract
 
-- Backups use `InventoryExport` with `schemaVersion: 1` and external IDs, not database IDs. Child records refer to parent records through the relevant `*ExternalId` fields. Newer collections (`fixtures`, `assetPhotos`) are optional for backward compatibility.
-- Paints, room-paint assignments, room photos and fixture photos are not yet exported.
+- Backups use `InventoryExport` with `schemaVersion: 1` and external IDs, not database IDs. Child records refer to parent records through the relevant `*ExternalId` fields. Newer collections (`fixtures`, `assetPhotos`, `paints`, `roomPaints`, `roomPhotos`, `fixturePhotos`) are optional for backward compatibility. Imported paints that match an existing brand/colour/code are reused.
 - Import always calls `/api/import/preview` before `/api/import/confirm`. Preview flags likely duplicate active assets (matched by name + location path), and confirm imports inside a transaction, skipping the external IDs the client passes back from the preview result. Keep preview validation and confirm behavior aligned when changing this schema.

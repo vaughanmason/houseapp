@@ -564,6 +564,8 @@ public static class InventoryApi
             var rooms = new Dictionary<string, Guid>();
             var locations = new Dictionary<string, Guid>();
             var assets = new Dictionary<string, Guid>();
+            var fixtures = new Dictionary<string, Guid>();
+            var paints = new Dictionary<string, Guid>();
 
             foreach (var property in confirmation.Inventory.Properties)
             {
@@ -613,7 +615,29 @@ public static class InventoryApi
                 db.StorageLocations.Add(entity);
                 locations[location.ExternalId] = entity.Id;
             }
-            foreach (var fixture in confirmation.Inventory.Fixtures ?? []) db.Fixtures.Add(new Fixture { RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, MaintenanceSchedule = fixture.MaintenanceSchedule, LastMaintenanceDate = fixture.LastMaintenanceDate, Condition = fixture.Condition, Notes = fixture.Notes });
+            foreach (var fixture in confirmation.Inventory.Fixtures ?? [])
+            {
+                var entity = new Fixture { RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, MaintenanceSchedule = fixture.MaintenanceSchedule, LastMaintenanceDate = fixture.LastMaintenanceDate, Condition = fixture.Condition, Notes = fixture.Notes };
+                db.Fixtures.Add(entity);
+                fixtures[fixture.ExternalId] = entity.Id;
+            }
+            foreach (var photo in confirmation.Inventory.FixturePhotos ?? []) db.FixturePhotos.Add(new FixturePhoto { FixtureId = fixtures[photo.FixtureExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
+            foreach (var photo in confirmation.Inventory.RoomPhotos ?? []) db.RoomPhotos.Add(new RoomPhoto { RoomId = rooms[photo.RoomExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
+            // The paint library is global, so reuse an existing paint with the same brand, colour name and code instead of duplicating it.
+            var existingPaints = await db.Paints.ToListAsync();
+            foreach (var paint in confirmation.Inventory.Paints ?? [])
+            {
+                var match = existingPaints.FirstOrDefault(x => Norm(x.Brand) == Norm(paint.Brand) && Norm(x.ColorName) == Norm(paint.ColorName) && Norm(x.ColorCode) == Norm(paint.ColorCode));
+                if (match is null)
+                {
+                    match = new Paint { Brand = paint.Brand.Trim(), ColorName = paint.ColorName.Trim(), ColorCode = paint.ColorCode?.Trim(), Finish = paint.Finish?.Trim(), Notes = paint.Notes?.Trim() };
+                    db.Paints.Add(match);
+                    existingPaints.Add(match);
+                }
+                paints[paint.ExternalId] = match.Id;
+            }
+            foreach (var roomPaint in (confirmation.Inventory.RoomPaints ?? []).DistinctBy(x => (rooms[x.RoomExternalId], paints[x.PaintExternalId])))
+                db.RoomPaints.Add(new RoomPaint { RoomId = rooms[roomPaint.RoomExternalId], PaintId = paints[roomPaint.PaintExternalId], SortOrder = roomPaint.SortOrder, Surface = roomPaint.Surface?.Trim() });
             foreach (var asset in confirmation.Inventory.Assets.Where(x => !confirmation.SkipExternalIds.Contains(x.ExternalId)))
             {
                 var entity = new Asset { PropertyId = properties[asset.PropertyExternalId], RoomId = asset.RoomExternalId is null ? null : rooms[asset.RoomExternalId], StorageLocationId = asset.StorageLocationExternalId is null ? null : locations[asset.StorageLocationExternalId], Name = asset.Name, Category = asset.Category, Description = asset.Description, Brand = asset.Brand, Model = asset.Model, SerialNumber = asset.SerialNumber, PurchaseDate = asset.PurchaseDate, PurchasePrice = asset.PurchasePrice, CurrentValue = asset.CurrentValue, Condition = asset.Condition, Notes = asset.Notes };
@@ -669,8 +693,77 @@ public static class InventoryApi
     static async Task<string?> ValidateAsset(AssetInput input, InventoryDbContext db) { if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Category)) return "Asset name and category are required."; if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return "The selected property does not exist."; if (input.RoomId is not null && input.StorageLocationId is not null) return "Choose either a room or a storage location, not both."; if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == input.PropertyId)) return "Room must be in the selected property."; if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == input.PropertyId)) return "Storage location must be in the selected property."; return null; }
     static Asset NewAsset(AssetInput x) { var a = new Asset { Name = "", Category = "" }; Apply(x, a); return a; }
     static void Apply(AssetInput x, Asset a) { a.PropertyId=x.PropertyId;a.RoomId=x.RoomId;a.StorageLocationId=x.StorageLocationId;a.Name=x.Name.Trim();a.Category=x.Category.Trim();a.Description=x.Description?.Trim();a.Brand=x.Brand?.Trim();a.Model=x.Model?.Trim();a.SerialNumber=x.SerialNumber?.Trim();a.PurchaseDate=x.PurchaseDate;a.PurchasePrice=x.PurchasePrice;a.CurrentValue=x.CurrentValue;a.Condition=x.Condition?.Trim();a.Notes=x.Notes?.Trim(); }
-    static async Task<InventoryExport> Export(InventoryDbContext db) { var props=await db.Properties.ToListAsync();var floors=await db.Floors.ToListAsync();var rooms=await db.Rooms.ToListAsync();var surfaces=await db.Surfaces.ToListAsync();var fixtures=await db.Fixtures.ToListAsync();var locs=await db.StorageLocations.ToListAsync();var assets=await db.Assets.ToListAsync();var propertyPhotos=await db.PropertyPhotos.ToListAsync();var assetPhotos=await db.AssetPhotos.ToListAsync();return new(1,props.Select(x=>new ImportProperty(x.Id.ToString(),x.Name,x.Address,x.PurchaseDate,x.PurchasePrice,x.FloorArea,x.Notes,NormalizeCurrency(x.Currency) ?? "USD")).ToList(),floors.Select(x=>new ImportFloor(x.Id.ToString(),x.PropertyId.ToString(),x.Name,x.Notes)).ToList(),rooms.Select(x=>new ImportRoom(x.Id.ToString(),x.FloorId?.ToString() ?? string.Empty,x.Name,x.Type,x.Area,x.Volume,x.CeilingHeight,x.Length,x.Width,x.Height,x.Flooring,x.WallFinish,x.CeilingFinish,x.PaintDetails,x.WindowsCount,x.DoorsCount,x.FixturesNotes,x.UtilitiesNotes,x.Notes)).ToList(),surfaces.Select(x=>new ImportSurface(x.Id.ToString(),x.RoomId.ToString(),x.Name,x.SurfaceType,x.PaintBrand,x.ColorName,x.ColorCode,x.Finish,x.Coats,x.PaintedDate,x.Painter,x.QuantityPurchased,x.Manufacturer,x.ProductName,x.Material,x.Supplier,x.Warranty,x.Invoice,x.InstallationDate,x.Notes,x.SortOrder)).ToList(),locs.Select(x=>new ImportStorageLocation(x.Id.ToString(),x.PropertyId.ToString(),x.ParentId?.ToString(),x.Name,x.Type)).ToList(),assets.Where(x=>!x.IsArchived).Select(x=>new ImportAsset(x.Id.ToString(),x.PropertyId.ToString(),x.RoomId?.ToString(),x.StorageLocationId?.ToString(),x.Name,x.Category,x.Description,x.Brand,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Condition,x.Notes)).ToList(),propertyPhotos.Select(x=>new ImportPropertyPhoto(x.Id.ToString(),x.PropertyId.ToString(),x.StorageKey,x.Caption,x.SortOrder)).ToList(),fixtures.Select(x=>new ImportFixture(x.Id.ToString(),x.RoomId.ToString(),x.Name,x.Type,x.Manufacturer,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Warranty,x.ManualUrl,x.InstallerName,x.InstallationDate,x.MaintenanceSchedule,x.LastMaintenanceDate,x.Condition,x.Notes)).ToList(),assetPhotos.Select(x=>new ImportAssetPhoto(x.Id.ToString(),x.AssetId.ToString(),x.StorageKey,x.Caption,x.SortOrder)).ToList()); }
-    static async Task<ImportPreviewDto> Preview(InventoryExport i, InventoryDbContext db) { var errors=new List<string>(); if(i.SchemaVersion!=1) errors.Add("Only schemaVersion 1 is supported."); var fixtures = i.Fixtures ?? []; var assetPhotos = i.AssetPhotos ?? []; var ids=i.Properties.Select(x=>x.ExternalId).Concat(i.Floors.Select(x=>x.ExternalId)).Concat(i.Rooms.Select(x=>x.ExternalId)).Concat(i.Surfaces.Select(x=>x.ExternalId)).Concat(i.StorageLocations.Select(x=>x.ExternalId)).Concat(i.Assets.Select(x=>x.ExternalId)).Concat(i.PropertyPhotos.Select(x=>x.ExternalId)).Concat(fixtures.Select(x=>x.ExternalId)).Concat(assetPhotos.Select(x=>x.ExternalId)).ToList();if(ids.Any(string.IsNullOrWhiteSpace)||ids.Count!=ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");var propIds=i.Properties.Select(x=>x.ExternalId).ToHashSet();var floorIds=i.Floors.Select(x=>x.ExternalId).ToHashSet();var roomIds=i.Rooms.Select(x=>x.ExternalId).ToHashSet();var locIds=i.StorageLocations.Select(x=>x.ExternalId).ToHashSet();if(i.Properties.Any(x=>string.IsNullOrWhiteSpace(x.Name))||i.Assets.Any(x=>string.IsNullOrWhiteSpace(x.Name)||string.IsNullOrWhiteSpace(x.Category))) errors.Add("Properties and assets require names; assets also require categories.");if(i.Properties.Any(x=>x.Currency is not null && NormalizeCurrency(x.Currency) is null)) errors.Add("Property currency must be a three-letter ISO code.");if(i.PropertyPhotos.Any(x=>string.IsNullOrWhiteSpace(x.StorageKey)||string.IsNullOrWhiteSpace(x.PropertyExternalId))) errors.Add("Property photos require a storage key and a referenced property.");if(fixtures.Any(x=>string.IsNullOrWhiteSpace(x.RoomExternalId)||string.IsNullOrWhiteSpace(x.Name)||string.IsNullOrWhiteSpace(x.Type))) errors.Add("Fixtures require a room reference, name, and type.");if(assetPhotos.Any(x=>string.IsNullOrWhiteSpace(x.AssetExternalId))) errors.Add("Asset photos require a referenced asset.");if(i.Floors.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Rooms.Any(x=>!floorIds.Contains(x.FloorExternalId))||i.StorageLocations.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Assets.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.PropertyPhotos.Any(x=>!propIds.Contains(x.PropertyExternalId))||i.Surfaces.Any(x=>!roomIds.Contains(x.RoomExternalId))||fixtures.Any(x=>!roomIds.Contains(x.RoomExternalId))||assetPhotos.Any(x=>!i.Assets.Any(a=>a.ExternalId==x.AssetExternalId))) errors.Add("Every floor, room, surface, location, asset, property photo, fixture, and asset photo must reference an imported parent record.");if(i.Assets.Any(x=>x.RoomExternalId is not null&&!roomIds.Contains(x.RoomExternalId)||x.StorageLocationExternalId is not null&&!locIds.Contains(x.StorageLocationExternalId))) errors.Add("Assets reference an unknown room or storage location.");var existing=await AssetDtos(db,null,false);var duplicates=i.Assets.Where(a=>existing.Any(e=>Norm(e.Name)==Norm(a.Name)&&Norm(e.LocationPath)==Norm(LocationImportPath(a,i)))).Select(x=>x.ExternalId).ToList();return new(errors.Count==0,errors,i.Properties.Count,i.Floors.Count,i.Rooms.Count,i.Surfaces.Count,i.StorageLocations.Count,i.Assets.Count,duplicates); }
+    static async Task<InventoryExport> Export(InventoryDbContext db)
+    {
+        var props = await db.Properties.ToListAsync();
+        var floors = await db.Floors.ToListAsync();
+        var rooms = await db.Rooms.ToListAsync();
+        var surfaces = await db.Surfaces.ToListAsync();
+        var fixtures = await db.Fixtures.ToListAsync();
+        var locs = await db.StorageLocations.ToListAsync();
+        var assets = await db.Assets.Where(x => !x.IsArchived).ToListAsync();
+        var propertyPhotos = await db.PropertyPhotos.ToListAsync();
+        var assetPhotos = await db.AssetPhotos.Where(x => x.Asset != null && !x.Asset.IsArchived).ToListAsync();
+        var paints = await db.Paints.ToListAsync();
+        var roomPaints = await db.RoomPaints.ToListAsync();
+        var roomPhotos = await db.RoomPhotos.ToListAsync();
+        var fixturePhotos = await db.FixturePhotos.ToListAsync();
+        return new(1,
+            props.Select(x => new ImportProperty(x.Id.ToString(), x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes, NormalizeCurrency(x.Currency) ?? "USD")).ToList(),
+            floors.Select(x => new ImportFloor(x.Id.ToString(), x.PropertyId.ToString(), x.Name, x.Notes)).ToList(),
+            rooms.Select(x => new ImportRoom(x.Id.ToString(), x.FloorId?.ToString() ?? string.Empty, x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes)).ToList(),
+            surfaces.Select(x => new ImportSurface(x.Id.ToString(), x.RoomId.ToString(), x.Name, x.SurfaceType, x.PaintBrand, x.ColorName, x.ColorCode, x.Finish, x.Coats, x.PaintedDate, x.Painter, x.QuantityPurchased, x.Manufacturer, x.ProductName, x.Material, x.Supplier, x.Warranty, x.Invoice, x.InstallationDate, x.Notes, x.SortOrder)).ToList(),
+            locs.Select(x => new ImportStorageLocation(x.Id.ToString(), x.PropertyId.ToString(), x.ParentId?.ToString(), x.Name, x.Type)).ToList(),
+            assets.Select(x => new ImportAsset(x.Id.ToString(), x.PropertyId.ToString(), x.RoomId?.ToString(), x.StorageLocationId?.ToString(), x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes)).ToList(),
+            propertyPhotos.Select(x => new ImportPropertyPhoto(x.Id.ToString(), x.PropertyId.ToString(), x.StorageKey, x.Caption, x.SortOrder)).ToList(),
+            fixtures.Select(x => new ImportFixture(x.Id.ToString(), x.RoomId.ToString(), x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes)).ToList(),
+            assetPhotos.Select(x => new ImportAssetPhoto(x.Id.ToString(), x.AssetId.ToString(), x.StorageKey, x.Caption, x.SortOrder)).ToList(),
+            paints.Select(x => new ImportPaint(x.Id.ToString(), x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes)).ToList(),
+            roomPaints.Select(x => new ImportRoomPaint($"{x.RoomId}:{x.PaintId}", x.RoomId.ToString(), x.PaintId.ToString(), x.SortOrder, x.Surface)).ToList(),
+            roomPhotos.Select(x => new ImportRoomPhoto(x.Id.ToString(), x.RoomId.ToString(), x.StorageKey, x.Caption, x.SortOrder)).ToList(),
+            fixturePhotos.Select(x => new ImportFixturePhoto(x.Id.ToString(), x.FixtureId.ToString(), x.StorageKey, x.Caption, x.SortOrder)).ToList());
+    }
+    static async Task<ImportPreviewDto> Preview(InventoryExport i, InventoryDbContext db)
+    {
+        var errors = new List<string>();
+        if (i.SchemaVersion != 1) errors.Add("Only schemaVersion 1 is supported.");
+        var fixtures = i.Fixtures ?? [];
+        var assetPhotos = i.AssetPhotos ?? [];
+        var paints = i.Paints ?? [];
+        var roomPaints = i.RoomPaints ?? [];
+        var roomPhotos = i.RoomPhotos ?? [];
+        var fixturePhotos = i.FixturePhotos ?? [];
+        var ids = i.Properties.Select(x => x.ExternalId).Concat(i.Floors.Select(x => x.ExternalId)).Concat(i.Rooms.Select(x => x.ExternalId)).Concat(i.Surfaces.Select(x => x.ExternalId))
+            .Concat(i.StorageLocations.Select(x => x.ExternalId)).Concat(i.Assets.Select(x => x.ExternalId)).Concat(i.PropertyPhotos.Select(x => x.ExternalId)).Concat(fixtures.Select(x => x.ExternalId))
+            .Concat(assetPhotos.Select(x => x.ExternalId)).Concat(paints.Select(x => x.ExternalId)).Concat(roomPaints.Select(x => x.ExternalId)).Concat(roomPhotos.Select(x => x.ExternalId))
+            .Concat(fixturePhotos.Select(x => x.ExternalId)).ToList();
+        if (ids.Any(string.IsNullOrWhiteSpace) || ids.Count != ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");
+        var propIds = i.Properties.Select(x => x.ExternalId).ToHashSet();
+        var floorIds = i.Floors.Select(x => x.ExternalId).ToHashSet();
+        var roomIds = i.Rooms.Select(x => x.ExternalId).ToHashSet();
+        var locIds = i.StorageLocations.Select(x => x.ExternalId).ToHashSet();
+        var assetIds = i.Assets.Select(x => x.ExternalId).ToHashSet();
+        var fixtureIds = fixtures.Select(x => x.ExternalId).ToHashSet();
+        var paintIds = paints.Select(x => x.ExternalId).ToHashSet();
+        if (i.Properties.Any(x => string.IsNullOrWhiteSpace(x.Name)) || i.Assets.Any(x => string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Category))) errors.Add("Properties and assets require names; assets also require categories.");
+        if (i.Properties.Any(x => x.Currency is not null && NormalizeCurrency(x.Currency) is null)) errors.Add("Property currency must be a three-letter ISO code.");
+        if (i.PropertyPhotos.Any(x => string.IsNullOrWhiteSpace(x.StorageKey) || string.IsNullOrWhiteSpace(x.PropertyExternalId))) errors.Add("Property photos require a storage key and a referenced property.");
+        if (fixtures.Any(x => string.IsNullOrWhiteSpace(x.RoomExternalId) || string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Type))) errors.Add("Fixtures require a room reference, name, and type.");
+        if (assetPhotos.Any(x => string.IsNullOrWhiteSpace(x.AssetExternalId))) errors.Add("Asset photos require a referenced asset.");
+        if (paints.Any(x => string.IsNullOrWhiteSpace(x.Brand) || string.IsNullOrWhiteSpace(x.ColorName))) errors.Add("Paints require a brand and colour name.");
+        if (roomPhotos.Any(x => string.IsNullOrWhiteSpace(x.StorageKey)) || fixturePhotos.Any(x => string.IsNullOrWhiteSpace(x.StorageKey))) errors.Add("Room and fixture photos require a storage key.");
+        if (roomPaints.GroupBy(x => (x.RoomExternalId, x.PaintExternalId)).Any(x => x.Count() > 1)) errors.Add("A paint can only be assigned to a room once.");
+        if (i.Floors.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Rooms.Any(x => !floorIds.Contains(x.FloorExternalId)) || i.StorageLocations.Any(x => !propIds.Contains(x.PropertyExternalId))
+            || i.Assets.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.PropertyPhotos.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Surfaces.Any(x => !roomIds.Contains(x.RoomExternalId))
+            || fixtures.Any(x => !roomIds.Contains(x.RoomExternalId)) || assetPhotos.Any(x => !assetIds.Contains(x.AssetExternalId)) || roomPhotos.Any(x => !roomIds.Contains(x.RoomExternalId))
+            || fixturePhotos.Any(x => !fixtureIds.Contains(x.FixtureExternalId)) || roomPaints.Any(x => !roomIds.Contains(x.RoomExternalId) || !paintIds.Contains(x.PaintExternalId)))
+            errors.Add("Every floor, room, surface, location, asset, fixture, photo, and room paint must reference an imported parent record.");
+        if (i.Assets.Any(x => x.RoomExternalId is not null && !roomIds.Contains(x.RoomExternalId) || x.StorageLocationExternalId is not null && !locIds.Contains(x.StorageLocationExternalId))) errors.Add("Assets reference an unknown room or storage location.");
+        var existing = await AssetDtos(db, null, false);
+        var duplicates = i.Assets.Where(a => existing.Any(e => Norm(e.Name) == Norm(a.Name) && Norm(e.LocationPath) == Norm(LocationImportPath(a, i)))).Select(x => x.ExternalId).ToList();
+        var photoCount = i.PropertyPhotos.Count + assetPhotos.Count + roomPhotos.Count + fixturePhotos.Count;
+        return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount);
+    }
     static string? LocationImportPath(ImportAsset a, InventoryExport i)
     {
         if (a.StorageLocationExternalId is null) return a.RoomExternalId is null ? null : i.Rooms.SingleOrDefault(x => x.ExternalId == a.RoomExternalId)?.Name;

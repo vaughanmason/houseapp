@@ -147,6 +147,64 @@ public sealed class InventoryValidationTests
         Assert.Single(assets);
     }
 
+    [Fact]
+    public async Task ExportThenImport_RoundTripsPaintsAndAllPhotos()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var floor = await CreateFloorAsync(source, property.Id);
+            var room = await CreateRoomAsync(source, floor.Id);
+            var fixture = await (await source.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id))).Content.ReadFromJsonAsync<FixtureDto>();
+            Assert.NotNull(fixture);
+            Assert.Equal(HttpStatusCode.Created, (await source.PostAsJsonAsync($"/api/fixtures/{fixture.Id}/photos", new FixturePhotoInput("fixtures/sink.jpg", "Sink", 0))).StatusCode);
+            Assert.Equal(HttpStatusCode.Created, (await source.PostAsJsonAsync($"/api/rooms/{room.Id}/photos", new PhotoMetadataInput("rooms/lounge.jpg", "Lounge", 0))).StatusCode);
+            var paint = await (await source.PostAsJsonAsync("/api/paints", new PaintInput("Dulux", "Oyster White", "OW-104", "Eggshell", null))).Content.ReadFromJsonAsync<PaintDto>();
+            Assert.NotNull(paint);
+            Assert.Equal(HttpStatusCode.OK, (await source.PostAsJsonAsync($"/api/rooms/{room.Id}/paints", new RoomPaintInput(paint.Id, 0, "North wall"))).StatusCode);
+            await CreateAssetAsync(source, property.Id, room.Id, null, "Couch");
+            var archived = await CreateAssetAsync(source, property.Id, null, null, "Old TV");
+            Assert.Equal(HttpStatusCode.Created, (await source.PostAsJsonAsync($"/api/assets/{archived.Id}/photos", new AssetPhotoInput("assets/tv.jpg", null, 0))).StatusCode);
+            await source.PostAsync($"/api/assets/{archived.Id}/archive", null);
+
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+
+        Assert.Single(backup.Paints!);
+        Assert.Single(backup.RoomPaints!);
+        Assert.Single(backup.RoomPhotos!);
+        Assert.Single(backup.FixturePhotos!);
+        Assert.Empty(backup.AssetPhotos!);
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        var preview = await (await target.PostAsJsonAsync("/api/import/preview", backup)).Content.ReadFromJsonAsync<ImportPreviewDto>();
+        Assert.NotNull(preview);
+        Assert.True(preview.IsValid, string.Join("; ", preview.Errors));
+        Assert.Equal(1, preview.Paints);
+        Assert.Equal(2, preview.Photos);
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
+
+        var restored = await target.GetFromJsonAsync<InventoryExport>("/api/export");
+        Assert.NotNull(restored);
+        var restoredRoomPaint = Assert.Single(restored.RoomPaints!);
+        Assert.Equal("North wall", restoredRoomPaint.Surface);
+        Assert.Equal("Oyster White", Assert.Single(restored.Paints!).ColorName);
+        Assert.Equal("Lounge", Assert.Single(restored.RoomPhotos!).Caption);
+        Assert.Equal("Sink", Assert.Single(restored.FixturePhotos!).Caption);
+        Assert.Single(restored.Assets);
+
+        // Importing the same backup again reuses the existing paint rather than duplicating the library.
+        var secondPreview = await (await target.PostAsJsonAsync("/api/import/preview", backup)).Content.ReadFromJsonAsync<ImportPreviewDto>();
+        Assert.NotNull(secondPreview);
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = secondPreview.DuplicateExternalIds })).StatusCode);
+        var paints = await target.GetFromJsonAsync<List<PaintDto>>("/api/paints");
+        Assert.NotNull(paints);
+        Assert.Single(paints);
+    }
+
     private static FixtureInput FixtureFor(Guid roomId) =>
         new(roomId, "Sink", "Sink", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 

@@ -73,8 +73,12 @@ InventoryExport {
   StorageLocations[],
   Assets[],
   PropertyPhotos[],
-  Fixtures[],
-  AssetPhotos[]
+  Fixtures[],       // optional
+  AssetPhotos[],    // optional
+  Paints[],         // optional; matched to existing paints by brand/colour/code
+  RoomPaints[],     // optional
+  RoomPhotos[],     // optional
+  FixturePhotos[]   // optional
 }
 
 ImportPreviewDto {
