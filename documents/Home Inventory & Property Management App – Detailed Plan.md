@@ -29,7 +29,7 @@ Property
 ```
 Everything belongs somewhere.  
 
-Implementation status (current): Modules 1–4 are implemented and validated in the app. Modules 5–17 remain planned for future work.  
+Implementation status (2026-10-04): Modules 1–5 and 12 (Paint Library) are implemented. Modules 6, 7, 9, 15 and 17 are partially implemented. Modules 8, 10, 11, 13, 14 and 16 are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
   
 ⸻  
   
@@ -157,6 +157,7 @@ Installation Date
 ⸻  
   
 ## Module 5 – Fixtures  
+Status: Implemented. Room-scoped fixtures with manufacturer/model/serial, purchase and value, warranty, manual URL, installer, maintenance schedule, condition and photo metadata are available in the API, UI, import/export and tests.
 Permanent items.  
 Examples  
 * Sink  
