@@ -93,6 +93,12 @@
                                             <div class="small text-muted">
                                                 Flooring: @room.Flooring · Wall: @room.WallFinish · Ceiling: @room.CeilingFinish
                                             </div>
+                                            @if (completion.TryGetValue(room.Id, out var status))
+                                            {
+                                                <div class="small @(status.Missing.Count == 0 ? "text-success" : "text-warning")">
+                                                    @(status.Missing.Count == 0 ? "Fully documented" : $"Missing: {string.Join(", ", status.Missing)}")
+                                                </div>
+                                            }
                                         </div>
                                         <div>
                                             <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(room)">Edit</button>
@@ -140,11 +146,11 @@
                         <div class="col-md-6"><input class="form-control" @bind="surfaceColorName" placeholder="Colour" /></div>
                     </div>
                     <div class="row g-2 mb-2">
-                        <div class="col-md-6"><input class="form-control" @bind="surfaceManufacturer" placeholder="Manufacturer" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceManufacturer" list="brands" placeholder="Manufacturer" /></div>
                         <div class="col-md-6"><input class="form-control" @bind="surfaceProductName" placeholder="Product name" /></div>
                     </div>
                     <div class="row g-2 mb-2">
-                        <div class="col-md-6"><input class="form-control" @bind="surfaceSupplier" placeholder="Supplier" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceSupplier" list="contact-names" placeholder="Supplier" /></div>
                         <div class="col-md-6"><input class="form-control" @bind="surfaceInstallationDate" type="date" title="Installation date" /></div>
                     </div>
                     <div class="row g-2 mb-2">
@@ -155,7 +161,7 @@
                 else
                 {
                     <div class="row g-2 mb-2">
-                        <div class="col-md-6"><input class="form-control" @bind="surfacePaintBrand" placeholder="Paint brand" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfacePaintBrand" list="brands" placeholder="Paint brand" /></div>
                         <div class="col-md-6"><input class="form-control" @bind="surfaceColorName" placeholder="Colour name" /></div>
                     </div>
                     <div class="row g-2 mb-2">
@@ -169,7 +175,7 @@
                             <div class="col-md-4"><input class="form-control" @bind="surfaceQuantity" type="number" step="0.1" placeholder="Litres bought" /></div>
                             <div class="col-md-4"><input class="form-control" @bind="surfacePaintedDate" type="date" title="Date painted" /></div>
                         </div>
-                        <input class="form-control mb-2" @bind="surfacePainter" placeholder="Painter" />
+                        <input class="form-control mb-2" @bind="surfacePainter" list="contact-names" placeholder="Painter" />
                     }
                 }
                 <div class="row g-2 mb-2">
@@ -212,7 +218,7 @@
 
     <div class="card card-body mt-4">
         <h3 class="h5">Room photos</h3>
-        <PhotoManager Endpoint="@($"api/rooms/{selectedRoomId}/photos")" />
+        <PhotoManager Endpoint="@($"api/rooms/{selectedRoomId}/photos")" Changed="LoadCompletion" />
     </div>
 }
 
@@ -221,11 +227,14 @@
     <div class="alert alert-danger mt-3">@error</div>
 }
 
+<LookupLists />
+
 @code {
     List<PropertyDto> properties = [];
     List<FloorDto> floors = [];
     List<RoomDto> rooms = [];
     List<SurfaceDto> surfaces = [];
+    Dictionary<Guid, RoomCompletionDto> completion = [];
 
     string floorId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "";
     string roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomPaintDetails = "", roomWindowsCount = "", roomDoorsCount = "";
@@ -246,7 +255,10 @@
         floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
         surfaces = [];
+        await LoadCompletion();
     }
+
+    async Task LoadCompletion() => completion = (await Http.GetFromJsonAsync<List<RoomCompletionDto>>("api/rooms/completion") ?? []).ToDictionary(x => x.RoomId);
 
     void StartEdit(RoomDto room)
     {
@@ -298,6 +310,7 @@
         editingRoomId = null;
         ClearForm();
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+        await LoadCompletion();
     }
 
     async Task DeleteRoom(Guid roomId)
@@ -306,6 +319,7 @@
         var response = await Http.DeleteAsync($"api/rooms/{roomId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
+        await LoadCompletion();
     }
 
     async Task LoadRoomDetails()
@@ -371,6 +385,7 @@
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         ClearSurfaceForm();
         surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
+        await LoadCompletion();
     }
 
     async Task DeleteSurface(Guid surfaceId)

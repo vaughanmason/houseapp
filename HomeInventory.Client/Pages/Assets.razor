@@ -31,11 +31,11 @@
             }
 
             <input class="form-control mb-2" @bind="assetName" placeholder="Asset name" />
-            <input class="form-control mb-2" @bind="assetCategory" placeholder="Category" />
+            <input class="form-control mb-2" @bind="assetCategory" list="asset-categories" placeholder="Category" />
             <input class="form-control mb-2" @bind="assetDescription" placeholder="Description" />
 
             <h5 class="mt-3">Identification</h5>
-            <input class="form-control mb-2" @bind="assetBrand" placeholder="Brand" />
+            <input class="form-control mb-2" @bind="assetBrand" list="brands" placeholder="Brand" />
             <input class="form-control mb-2" @bind="assetModel" placeholder="Model" />
             <input class="form-control mb-2" @bind="assetSerialNumber" placeholder="Serial number" />
             <input class="form-control mb-2" @bind="assetBarcode" placeholder="Barcode (EAN/UPC or your own label)" />
@@ -266,6 +266,8 @@
 {
     <div class="alert alert-danger mt-3">@error</div>
 }
+
+<LookupLists />
 
 @code {
     List<PropertyDto> properties = [];

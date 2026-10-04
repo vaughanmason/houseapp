@@ -1,0 +1,137 @@
+@page "/contacts"
+@inject HttpClient Http
+
+<PageTitle>Contacts</PageTitle>
+
+<div class="mb-4">
+    <h1>Contacts</h1>
+    <p class="lead">Suppliers, installers, contractors and service providers. Their names are suggested in supplier and installer fields.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">@(editingId is null ? "Add contact" : "Edit contact")</h2>
+            <div class="row g-2 mb-2">
+                <div class="col-md-7"><input class="form-control" @bind="name" placeholder="Name" /></div>
+                <div class="col-md-5">
+                    <select class="form-select" @bind="kind">
+                        @foreach (var k in Kinds) { <option value="@k">@k</option> }
+                    </select>
+                </div>
+            </div>
+            <input class="form-control mb-2" @bind="company" placeholder="Company (optional)" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><input class="form-control" type="tel" @bind="phone" placeholder="Phone" /></div>
+                <div class="col-md-6"><input class="form-control" type="email" @bind="email" placeholder="Email" /></div>
+            </div>
+            <input class="form-control mb-2" @bind="website" placeholder="Website (https://…)" />
+            <textarea class="form-control mb-2" @bind="notes" placeholder="Notes (e.g. what they did, rates, reliability)"></textarea>
+            <div>
+                <button class="btn btn-primary" @onclick="SaveAsync">@(editingId is null ? "Add contact" : "Update contact")</button>
+                @if (editingId is not null) { <button class="btn btn-outline-secondary ms-2" @onclick="ClearForm">Cancel</button> }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h4 mb-0">Directory</h2>
+            <select class="form-select w-auto" @bind="filterKind">
+                <option value="">All kinds</option>
+                @foreach (var k in Kinds) { <option value="@k">@k</option> }
+            </select>
+        </div>
+        @if (Filtered().Count == 0)
+        {
+            <div class="alert alert-info">@(contacts.Count == 0 ? "No contacts yet. Add one to the left." : "No contacts of this kind.")</div>
+        }
+        else
+        {
+            <ul class="list-group">
+                @foreach (var contact in Filtered())
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>@contact.Name</strong> <span class="badge text-bg-light">@contact.Kind</span>
+                            @if (!string.IsNullOrEmpty(contact.Company)) { <div class="small text-muted">@contact.Company</div> }
+                            <div class="small">
+                                @if (!string.IsNullOrEmpty(contact.Phone)) { <a class="me-3" href="tel:@contact.Phone">@contact.Phone</a> }
+                                @if (!string.IsNullOrEmpty(contact.Email)) { <a class="me-3" href="mailto:@contact.Email">@contact.Email</a> }
+                                @if (!string.IsNullOrEmpty(contact.Website)) { <a href="@contact.Website" target="_blank" rel="noopener">Website</a> }
+                            </div>
+                            @if (!string.IsNullOrEmpty(contact.Notes)) { <div class="small text-muted">@contact.Notes</div> }
+                        </div>
+                        <div class="text-nowrap">
+                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(contact)">Edit</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => deleting = contact">Delete</button>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+<ConfirmDialog Show="deleting is not null"
+               Title="Delete contact"
+               Message="@($"Delete {deleting?.Name}? Records that mention them by name keep the text.")"
+               OnConfirm="DeleteAsync"
+               OnCancel="() => deleting = null" />
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    static readonly string[] Kinds = ["Supplier", "Installer", "Contractor", "Service provider", "Other"];
+
+    List<ContactDto> contacts = [];
+    Guid? editingId;
+    ContactDto? deleting;
+    string name = "", kind = "Supplier", company = "", phone = "", email = "", website = "", notes = "", filterKind = "";
+    string? error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    async Task ReloadAsync() => contacts = await Http.GetFromJsonAsync<List<ContactDto>>("api/contacts") ?? [];
+
+    List<ContactDto> Filtered() => contacts.Where(c => filterKind == "" || c.Kind == filterKind).ToList();
+
+    void StartEdit(ContactDto contact)
+    {
+        editingId = contact.Id;
+        (name, kind, company, phone, email, website, notes) = (contact.Name, contact.Kind, contact.Company ?? "", contact.Phone ?? "", contact.Email ?? "", contact.Website ?? "", contact.Notes ?? "");
+    }
+
+    void ClearForm()
+    {
+        editingId = null;
+        name = company = phone = email = website = notes = "";
+        kind = "Supplier";
+    }
+
+    async Task SaveAsync()
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(name)) { error = "Name is required."; return; }
+        var input = new ContactInput(name, company, kind, phone, email, website, notes);
+        var response = editingId is null ? await Http.PostAsJsonAsync("api/contacts", input) : await Http.PutAsJsonAsync($"api/contacts/{editingId}", input);
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        ClearForm();
+        await ReloadAsync();
+    }
+
+    async Task DeleteAsync()
+    {
+        if (deleting is null) return;
+        error = null;
+        var id = deleting.Id;
+        deleting = null;
+        var response = await Http.DeleteAsync($"api/contacts/{id}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        if (editingId == id) ClearForm();
+        await ReloadAsync();
+    }
+}

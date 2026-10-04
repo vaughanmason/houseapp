@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
@@ -107,6 +108,7 @@ public static class InventoryApi
             else if (propertyId is not null) rooms = rooms.Where(x => x.Floor != null && x.Floor.PropertyId == propertyId.Value);
             return Results.Ok(await rooms.OrderBy(x => x.Name).Select(x => ToDto(x)).ToListAsync());
         });
+        api.MapGet("/rooms/completion", async (Guid? propertyId, InventoryDbContext db) => Results.Ok(await RoomCompletion(db, propertyId)));
         api.MapGet("/floors/{id:guid}/rooms", async (Guid id, InventoryDbContext db) =>
         {
             if (!await db.Floors.AnyAsync(x => x.Id == id)) return Results.NotFound();
@@ -530,9 +532,11 @@ public static class InventoryApi
             if (entity is null) return Results.NotFound();
             var error = await ValidateAsset(input, db);
             if (error is not null) return Results.BadRequest(error);
-            var (fromRoom, fromLocation) = (entity.RoomId, entity.StorageLocationId);
+            var (fromRoom, fromLocation, fromValue) = (entity.RoomId, entity.StorageLocationId, entity.CurrentValue);
             Apply(input, entity);
             await RecordMove(db, entity, fromRoom, fromLocation);
+            if (fromValue != entity.CurrentValue)
+                db.AssetEvents.Add(new AssetEvent { AssetId = id, OccurredOn = Today(), Kind = "Valued", Description = $"Value {FormatAmount(fromValue)} → {FormatAmount(entity.CurrentValue)}" });
             await db.SaveChangesAsync();
             return Results.Ok((await AssetDtos(db, input.PropertyId, entity.IsArchived)).Single(x => x.Id == id));
         });
@@ -771,10 +775,49 @@ public static class InventoryApi
             using var data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.M);
             return Results.Content(new SvgQRCode(data).GetGraphic(4), "image/svg+xml");
         });
+        api.MapGet("/contacts", async (string? kind, InventoryDbContext db) =>
+            Results.Ok(await db.Contacts.Where(x => kind == null || x.Kind == kind).OrderBy(x => x.Name).Select(x => ToDto(x)).ToListAsync()));
+        api.MapPost("/contacts", async (ContactInput input, InventoryDbContext db) =>
+        {
+            if (ValidateContact(input) is { } error) return error;
+            var entity = new Contact { Name = "", Kind = "" };
+            ApplyContact(input, entity);
+            db.Contacts.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/contacts/{entity.Id}", ToDto(entity));
+        });
+        api.MapPut("/contacts/{id:guid}", async (Guid id, ContactInput input, InventoryDbContext db) =>
+        {
+            var entity = await db.Contacts.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            if (ValidateContact(input) is { } error) return error;
+            ApplyContact(input, entity);
+            await db.SaveChangesAsync();
+            return Results.Ok(ToDto(entity));
+        });
+        api.MapDelete("/contacts/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.Contacts.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            db.Contacts.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+        api.MapGet("/lookups", async (InventoryDbContext db) =>
+        {
+            static List<string> Distinct(IEnumerable<string?> values) => values.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+            var categories = await db.Assets.Select(x => x.Category).Distinct().ToListAsync();
+            var brands = await db.Assets.Select(x => x.Brand).Distinct().ToListAsync();
+            brands.AddRange(await db.Fixtures.Select(x => x.Manufacturer).Distinct().ToListAsync());
+            brands.AddRange(await db.Surfaces.Select(x => x.Manufacturer).Distinct().ToListAsync());
+            brands.AddRange(await db.Paints.Select(x => x.Brand).Distinct().ToListAsync());
+            var contacts = await db.Contacts.Select(x => x.Company == null ? x.Name : x.Company).ToListAsync();
+            contacts.AddRange(await db.Contacts.Where(x => x.Company != null).Select(x => x.Name).ToListAsync());
+            return new LookupsDto(Distinct(categories), Distinct(brands), Distinct(contacts));
+        });
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {
-            // TODO: Include recent purchases and room completion metrics.
-            // Values are only summed within one currency; properties with different currencies get separate totals.
+                        // Values are only summed within one currency; properties with different currencies get separate totals.
             var assets = await db.Assets.Where(x => !x.IsArchived).Select(x => new { x.Category, Value = x.CurrentValue ?? 0, Currency = x.Property!.Currency }).ToListAsync();
             var fixtures = await db.Fixtures.Select(x => new { Category = x.Type, Value = x.CurrentValue ?? 0, Currency = x.Room!.Floor!.Property!.Currency }).ToListAsync();
             var totals = assets.Select(x => (x.Currency, x.Category, x.Value, IsFixture: false))
@@ -791,7 +834,14 @@ public static class InventoryApi
             var dueDates = await db.MaintenanceTasks.Where(x => x.DueOn != null).Select(x => x.DueOn!.Value).ToListAsync();
             var warrantiesExpiring = await db.Documents.CountAsync(x => x.Kind == "Warranty" && x.ExpiresOn >= today && x.ExpiresOn <= today.AddDays(90));
             var missingReceipts = await db.Assets.CountAsync(x => !x.IsArchived && !db.Documents.Any(d => d.AssetId == x.Id && (d.Kind == "Receipt" || d.Kind == "Invoice")));
-            return new DashboardDto(assets.Count, fixtures.Count, totals, dueDates.Count(x => x < today), dueDates.Count(x => x >= today && x <= today.AddDays(30)), warrantiesExpiring, missingReceipts);
+            var recent = await db.Assets.Where(x => !x.IsArchived && x.PurchaseDate != null && x.PurchaseDate >= today.AddDays(-90))
+                .Select(x => new { x.Id, x.Name, x.Category, PurchaseDate = x.PurchaseDate!.Value, x.PurchasePrice, x.Property!.Currency }).ToListAsync();
+            var recentPurchases = recent.OrderByDescending(x => x.PurchaseDate).ThenBy(x => x.Name).Take(5)
+                .Select(x => new RecentPurchaseDto(x.Id, x.Name, x.Category, x.PurchaseDate, x.PurchasePrice, NormalizeCurrency(x.Currency) ?? "USD")).ToList();
+            var completion = await RoomCompletion(db);
+            var completionPercent = completion.Count == 0 ? 0 : (int)Math.Round(completion.Average(x => (double)x.Score / x.MaxScore) * 100);
+            return new DashboardDto(assets.Count, fixtures.Count, totals, dueDates.Count(x => x < today), dueDates.Count(x => x >= today && x <= today.AddDays(30)), warrantiesExpiring, missingReceipts,
+                recentPurchases, completionPercent, completion.Count(x => x.Score == x.MaxScore), completion.Count);
         });
         api.MapGet("/search", async (string? q, InventoryDbContext db) =>
         {
@@ -816,6 +866,8 @@ public static class InventoryApi
             var documents = await DocumentDtos(db, db.Documents.Where(x => EF.Functions.Like(x.Title, pattern, "\\") || EF.Functions.Like(x.Kind, pattern, "\\") || EF.Functions.Like(x.Tags, pattern, "\\")
                 || EF.Functions.Like(x.Notes, pattern, "\\") || EF.Functions.Like(x.FileName, pattern, "\\")).Take(Limit));
 
+            var contacts = await db.Contacts.Where(x => EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.Company, pattern, "\\") || EF.Functions.Like(x.Kind, pattern, "\\")
+                || EF.Functions.Like(x.Phone, pattern, "\\") || EF.Functions.Like(x.Email, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\")).Take(Limit).ToListAsync();
             var roomPaths = surfaces.Count > 0 ? await RoomPaths(db) : [];
             var paintResults = new List<SearchResultDto>();
             foreach (var paint in paints)
@@ -829,6 +881,7 @@ public static class InventoryApi
                 .Concat(paintResults)
                 .Concat(surfaces.Select(x => new SearchResultDto("Surface", x.Id, x.Name, string.Join(" · ", new[] { x.SurfaceType, x.SurfaceType == "flooring" ? x.Material : x.PaintBrand, x.ColorName }.Where(y => !string.IsNullOrWhiteSpace(y))), roomPaths.GetValueOrDefault(x.RoomId))))
                 .Concat(documents.Select(x => new SearchResultDto("Document", x.Id, x.Title, x.Kind, x.AttachedTo ?? x.PropertyName)))
+                .Concat(contacts.Select(x => new SearchResultDto("Contact", x.Id, x.Name, string.Join(" · ", new[] { x.Company, x.Kind }.Where(y => !string.IsNullOrWhiteSpace(y))), x.Phone ?? x.Email)))
                 .Take(Limit);
             return Results.Ok(results);
         });
@@ -913,6 +966,7 @@ public static class InventoryApi
             var records = await ExistingIds(db.MaintenanceRecords);
             var documents = await ExistingIds(db.Documents);
             var assetEvents = await ExistingIds(db.AssetEvents);
+            var contacts = await ExistingIds(db.Contacts);
 
             foreach (var property in inventory.Properties.Where(x => !properties.ContainsKey(x.ExternalId)))
             {
@@ -1049,6 +1103,8 @@ public static class InventoryApi
                     DocumentDate = document.DocumentDate, ExpiresOn = document.ExpiresOn, Tags = document.Tags?.Trim(), Notes = document.Notes?.Trim()
                 });
 
+            foreach (var contact in (inventory.Contacts ?? []).Where(x => !contacts.ContainsKey(x.ExternalId)))
+                db.Contacts.Add(new Contact { ExternalId = contact.ExternalId, Name = contact.Name.Trim(), Company = contact.Company?.Trim(), Kind = contact.Kind, Phone = contact.Phone?.Trim(), Email = contact.Email?.Trim(), Website = contact.Website?.Trim(), Notes = contact.Notes?.Trim() });
             // Skipped duplicate assets map to the existing asset, so their history is merged rather than lost.
             foreach (var assetEvent in (inventory.AssetEvents ?? []).Where(x => !assetEvents.ContainsKey(x.ExternalId) && assets.ContainsKey(x.AssetExternalId)))
                 db.AssetEvents.Add(new AssetEvent { ExternalId = assetEvent.ExternalId, AssetId = assets[assetEvent.AssetExternalId], OccurredOn = assetEvent.OccurredOn, Kind = assetEvent.Kind, Description = assetEvent.Description?.Trim(), Cost = assetEvent.Cost });
@@ -1224,6 +1280,45 @@ public static class InventoryApi
         string Label(Guid? room, Guid? location) => room is Guid r ? rooms.GetValueOrDefault(r) ?? "a room" : location is Guid l ? locations.GetValueOrDefault(l) ?? "storage" : "no location";
         db.AssetEvents.Add(new AssetEvent { AssetId = asset.Id, OccurredOn = Today(), Kind = "Moved", Description = $"{Label(fromRoom, fromLocation)} → {Label(asset.RoomId, asset.StorageLocationId)}" });
     }
+    static ContactDto ToDto(Contact x) => new(x.Id, x.Name, x.Company, x.Kind, x.Phone, x.Email, x.Website, x.Notes);
+    static IResult? ValidateContact(ContactInput input)
+    {
+        var errors = new Dictionary<string, string[]>();
+        if (string.IsNullOrWhiteSpace(input.Name)) errors["name"] = ["Name is required."];
+        if (!Contact.Kinds.Contains(input.Kind)) errors["kind"] = [$"Kind must be one of: {string.Join(", ", Contact.Kinds)}."];
+        if (!string.IsNullOrWhiteSpace(input.Email) && !input.Email.Contains('@', StringComparison.Ordinal)) errors["email"] = ["Enter a valid email address."];
+        if (!string.IsNullOrWhiteSpace(input.Website) && !(Uri.TryCreate(input.Website.Trim(), UriKind.Absolute, out var site) && (site.Scheme == Uri.UriSchemeHttp || site.Scheme == Uri.UriSchemeHttps)))
+            errors["website"] = ["Website must start with http:// or https://."];
+        return errors.Count > 0 ? Results.ValidationProblem(errors) : null;
+    }
+    static void ApplyContact(ContactInput x, Contact c)
+    {
+        c.Name = x.Name.Trim();
+        c.Company = string.IsNullOrWhiteSpace(x.Company) ? null : x.Company.Trim();
+        c.Kind = x.Kind;
+        c.Phone = x.Phone?.Trim();
+        c.Email = x.Email?.Trim();
+        c.Website = x.Website?.Trim();
+        c.Notes = x.Notes?.Trim();
+    }
+    static string FormatAmount(decimal? value) => value?.ToString("0.00", CultureInfo.InvariantCulture) ?? "none";
+    // A room is fully documented when it has dimensions, flooring, a wall finish, at least one surface record and at least one photo.
+    static async Task<List<RoomCompletionDto>> RoomCompletion(InventoryDbContext db, Guid? propertyId = null)
+    {
+        var paths = await RoomPaths(db);
+        var rooms = await db.Rooms.Where(x => propertyId == null || x.PropertyId == propertyId)
+            .Select(x => new { x.Id, x.Area, x.Length, x.Width, x.Flooring, x.WallFinish, Surfaces = x.Surfaces.Count, Photos = x.Photos.Count }).ToListAsync();
+        return rooms.Select(x =>
+        {
+            var missing = new List<string>();
+            if (x.Area is null && (x.Length is null || x.Width is null)) missing.Add("dimensions");
+            if (string.IsNullOrWhiteSpace(x.Flooring)) missing.Add("flooring");
+            if (string.IsNullOrWhiteSpace(x.WallFinish)) missing.Add("wall finish");
+            if (x.Surfaces == 0) missing.Add("surfaces");
+            if (x.Photos == 0) missing.Add("photos");
+            return new RoomCompletionDto(x.Id, paths.GetValueOrDefault(x.Id) ?? "", 5 - missing.Count, 5, missing);
+        }).OrderBy(x => x.Score).ThenBy(x => x.RoomPath).ToList();
+    }
     static async Task<Dictionary<Guid, string>> RoomPaths(InventoryDbContext db) =>
         await db.Rooms.Include(x => x.Floor).ThenInclude(x => x!.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
     // Rooms using a paint: explicit library assignments plus painted surfaces whose colour code, or colour name and brand, match.
@@ -1333,6 +1428,7 @@ public static class InventoryApi
         var records = await db.MaintenanceRecords.ToListAsync();
         var documents = await db.Documents.ToListAsync();
         var assetEvents = await db.AssetEvents.ToListAsync();
+        var contacts = await db.Contacts.ToListAsync();
         // Records keep the backup ID they were imported with, so backup → restore → backup cycles produce the same IDs.
         static string Ext(IHasExternalId x) => x.ExternalId ?? x.Id.ToString();
         var propertyIds = props.ToDictionary(x => x.Id, Ext);
@@ -1362,7 +1458,8 @@ public static class InventoryApi
             // Documents attached to an archived asset (not exported) fall back to property level in the backup.
             documents.Select(x => new ImportDocument(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid r ? roomIds[r] : null, x.FixtureId is Guid f ? fixtureIds[f] : null, x.AssetId is Guid a && assetIds.TryGetValue(a, out var assetExt) ? assetExt : null, x.MaintenanceTaskId is Guid t ? taskIds[t] : null, x.Title, x.Kind, x.StorageKey, x.FileName, x.ContentType, x.SizeBytes, x.DocumentDate, x.ExpiresOn, x.Tags, x.Notes)).ToList(),
             // History of archived assets stays out, like the assets themselves.
-            assetEvents.Where(x => assetIds.ContainsKey(x.AssetId)).Select(x => new ImportAssetEvent(Ext(x), assetIds[x.AssetId], x.OccurredOn, x.Kind, x.Description, x.Cost)).ToList());
+            assetEvents.Where(x => assetIds.ContainsKey(x.AssetId)).Select(x => new ImportAssetEvent(Ext(x), assetIds[x.AssetId], x.OccurredOn, x.Kind, x.Description, x.Cost)).ToList(),
+            contacts.Select(x => new ImportContact(Ext(x), x.Name, x.Company, x.Kind, x.Phone, x.Email, x.Website, x.Notes)).ToList());
     }
     // Maps every existing row of one type by its backup ID and its database ID, so imports can recognise records they already hold.
     static async Task<Dictionary<string, Guid>> ExistingIds<T>(IQueryable<T> rows) where T : class, IHasExternalId
@@ -1389,10 +1486,11 @@ public static class InventoryApi
         var records = i.MaintenanceRecords ?? [];
         var documents = i.Documents ?? [];
         var assetEvents = i.AssetEvents ?? [];
+        var contacts = i.Contacts ?? [];
         var ids = i.Properties.Select(x => x.ExternalId).Concat(i.Floors.Select(x => x.ExternalId)).Concat(i.Rooms.Select(x => x.ExternalId)).Concat(i.Surfaces.Select(x => x.ExternalId))
             .Concat(i.StorageLocations.Select(x => x.ExternalId)).Concat(i.Assets.Select(x => x.ExternalId)).Concat(i.PropertyPhotos.Select(x => x.ExternalId)).Concat(fixtures.Select(x => x.ExternalId))
             .Concat(assetPhotos.Select(x => x.ExternalId)).Concat(paints.Select(x => x.ExternalId)).Concat(roomPaints.Select(x => x.ExternalId)).Concat(roomPhotos.Select(x => x.ExternalId))
-            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).Concat(documents.Select(x => x.ExternalId)).Concat(assetEvents.Select(x => x.ExternalId)).ToList();
+            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).Concat(documents.Select(x => x.ExternalId)).Concat(assetEvents.Select(x => x.ExternalId)).Concat(contacts.Select(x => x.ExternalId)).ToList();
         if (ids.Any(string.IsNullOrWhiteSpace) || ids.Count != ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");
         var propIds = i.Properties.Select(x => x.ExternalId).ToHashSet();
         var floorIds = i.Floors.Select(x => x.ExternalId).ToHashSet();
@@ -1428,6 +1526,8 @@ public static class InventoryApi
             errors.Add("A document can be attached to at most one room, fixture, asset or maintenance task.");
         if (assetEvents.Any(x => !assetIds.Contains(x.AssetExternalId) || !AssetEvent.AutomaticKinds.Contains(x.Kind) && !AssetEvent.ManualKinds.Contains(x.Kind)))
             errors.Add("Asset events must reference an imported asset and use a known kind.");
+        if (contacts.Any(x => string.IsNullOrWhiteSpace(x.Name) || !Contact.Kinds.Contains(x.Kind)))
+            errors.Add($"Contacts require a name and a kind ({string.Join(", ", Contact.Kinds)}).");
         if (i.Floors.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Rooms.Any(x => !floorIds.Contains(x.FloorExternalId)) || i.StorageLocations.Any(x => !propIds.Contains(x.PropertyExternalId))
             || i.Assets.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.PropertyPhotos.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Surfaces.Any(x => !roomIds.Contains(x.RoomExternalId))
             || fixtures.Any(x => !roomIds.Contains(x.RoomExternalId)) || assetPhotos.Any(x => !assetIds.Contains(x.AssetExternalId)) || roomPhotos.Any(x => !roomIds.Contains(x.RoomExternalId))
@@ -1448,7 +1548,8 @@ public static class InventoryApi
             + await CountExisting(db.AssetPhotos, assetPhotos.Select(x => x.ExternalId)) + await CountExisting(db.RoomPhotos, roomPhotos.Select(x => x.ExternalId))
             + await CountExisting(db.FixturePhotos, fixturePhotos.Select(x => x.ExternalId))
             + await CountExisting(db.MaintenanceTasks, tasks.Select(x => x.ExternalId)) + await CountExisting(db.MaintenanceRecords, records.Select(x => x.ExternalId))
-            + await CountExisting(db.Documents, documents.Select(x => x.ExternalId)) + await CountExisting(db.AssetEvents, assetEvents.Select(x => x.ExternalId));
+            + await CountExisting(db.Documents, documents.Select(x => x.ExternalId)) + await CountExisting(db.AssetEvents, assetEvents.Select(x => x.ExternalId))
+            + await CountExisting(db.Contacts, contacts.Select(x => x.ExternalId));
         var photoCount = i.PropertyPhotos.Count + assetPhotos.Count + roomPhotos.Count + fixturePhotos.Count;
         return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount, existingCount, tasks.Count, documents.Count);
     }

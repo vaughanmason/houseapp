@@ -1,0 +1,18 @@
+@inject HttpClient Http
+
+@* Shared suggestion lists for free-text inputs: add list="asset-categories", list="brands" or list="contact-names" to an input. *@
+<datalist id="asset-categories">
+    @foreach (var value in lookups?.AssetCategories ?? []) { <option value="@value" /> }
+</datalist>
+<datalist id="brands">
+    @foreach (var value in lookups?.Brands ?? []) { <option value="@value" /> }
+</datalist>
+<datalist id="contact-names">
+    @foreach (var value in lookups?.ContactNames ?? []) { <option value="@value" /> }
+</datalist>
+
+@code {
+    LookupsDto? lookups;
+
+    protected override async Task OnInitializedAsync() => lookups = await Http.GetFromJsonAsync<LookupsDto>("api/lookups");
+}

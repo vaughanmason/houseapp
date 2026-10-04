@@ -12,12 +12,23 @@ else
         <div class="col-md-4"><div class="card p-3"><div class="text-muted">Fixtures</div><strong class="display-6">@dashboard.FixtureCount</strong></div></div>
         <div class="col-md-4"><a class="card p-3 text-decoration-none @(dashboard.MaintenanceOverdue > 0 ? "border-danger" : "")" href="maintenance"><div class="text-muted">Maintenance</div><strong class="display-6">@dashboard.MaintenanceOverdue overdue</strong><div class="small text-muted">@dashboard.MaintenanceDueSoon due in the next 30 days</div></a></div>
         <div class="col-md-4"><a class="card p-3 text-decoration-none @(dashboard.WarrantiesExpiring > 0 ? "border-warning" : "")" href="documents"><div class="text-muted">Warranties</div><strong class="display-6">@dashboard.WarrantiesExpiring expiring</strong><div class="small text-muted">within the next 90 days</div></a></div>
+        <div class="col-md-4"><a class="card p-3 text-decoration-none" href="rooms"><div class="text-muted">Rooms documented</div><strong class="display-6">@dashboard.RoomCompletionPercent%</strong><div class="small text-muted">@dashboard.RoomsComplete of @dashboard.RoomCount rooms complete</div></a></div>
         <div class="col-md-4"><a class="card p-3 text-decoration-none" href="documents"><div class="text-muted">Receipts</div><strong class="display-6">@dashboard.AssetsMissingReceipts missing</strong><div class="small text-muted">active assets without a receipt or invoice</div></a></div>
         @foreach (var total in dashboard.Totals)
         {
             <div class="col-md-4"><div class="card p-3"><div class="text-muted">Current insured value (@total.Currency)</div><strong class="display-6"><CurrencyDisplay Value="total.TotalValue" CurrencyCode="@total.Currency" /></strong></div></div>
         }
     </div>
+    @if (dashboard.RecentPurchases is { Count: > 0 } recent)
+    {
+        <h2>Recent purchases</h2>
+        <ul class="list-group mb-4">
+            @foreach (var purchase in recent)
+            {
+                <li class="list-group-item d-flex justify-content-between"><span><strong>@purchase.Name</strong> <span class="text-muted">@purchase.Category · @purchase.PurchaseDate.ToString("yyyy-MM-dd")</span></span><CurrencyDisplay Value="purchase.PurchasePrice" CurrencyCode="@purchase.Currency" /></li>
+            }
+        </ul>
+    }
     <h2>Value by category</h2>
     @if (dashboard.Totals.Count == 0) { <p>No assets yet. <a href="assets">Add your first asset</a>.</p> }
     @foreach (var total in dashboard.Totals)

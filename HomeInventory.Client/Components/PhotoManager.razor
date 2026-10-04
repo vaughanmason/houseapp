@@ -53,6 +53,10 @@
     [Parameter, EditorRequired]
     public string Endpoint { get; set; } = "";
 
+    /// <summary>Raised after a photo is added or deleted.</summary>
+    [Parameter]
+    public EventCallback Changed { get; set; }
+
     List<PhotoMetadataDto> photos = [];
     string caption = "", externalKey = "", loadedEndpoint = "";
     int sortOrder;
@@ -104,6 +108,7 @@
         caption = "";
         sortOrder = 0;
         await ReloadAsync();
+        await Changed.InvokeAsync();
     }
 
     async Task DeleteAsync(Guid photoId)
@@ -112,5 +117,6 @@
         var response = await Http.DeleteAsync($"{Endpoint}/{photoId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         await ReloadAsync();
+        await Changed.InvokeAsync();
     }
 }

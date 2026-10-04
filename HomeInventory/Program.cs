@@ -12,6 +12,7 @@ var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFo
 Directory.CreateDirectory(dataDirectory);
 builder.Services.AddDbContext<InventoryDbContext>(options => options.UseSqlite($"Data Source={Path.Combine(dataDirectory, "inventory.db")}"));
 builder.Services.AddSingleton(new FileStore(builder.Configuration["Storage:FilesPath"] ?? Path.Combine(dataDirectory, "files")));
+builder.Services.AddHostedService<OrphanFileSweeper>();
 
 var app = builder.Build();
 

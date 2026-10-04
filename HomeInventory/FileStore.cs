@@ -81,6 +81,17 @@ public sealed partial class FileStore(string rootPath)
         return false;
     }
 
+    /// <summary>Stored files (by key) last written before <paramref name="olderThanUtc"/>.</summary>
+    public IEnumerable<string> KeysOlderThan(DateTime olderThanUtc)
+    {
+        if (!Directory.Exists(RootPath)) yield break;
+        foreach (var path in Directory.EnumerateFiles(RootPath, "*", SearchOption.AllDirectories))
+        {
+            var key = Path.GetRelativePath(RootPath, path).Replace(Path.DirectorySeparatorChar, '/');
+            if (IsStoredKey(key) && File.GetLastWriteTimeUtc(path) < olderThanUtc) yield return key;
+        }
+    }
+
     public Stream? Open(string key) => IsStoredKey(key) && File.Exists(FullPath(key)) ? File.OpenRead(FullPath(key)) : null;
 
     public void Delete(string key)

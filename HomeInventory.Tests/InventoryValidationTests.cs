@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using HomeInventory.Client;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeInventory.Tests;
 
@@ -984,6 +985,101 @@ public sealed class InventoryValidationTests
 
         var task = Assert.Single((await client.GetFromJsonAsync<List<MaintenanceTaskDto>>("/api/maintenance"))!);
         Assert.Equal(("Service: Geyser", "Every 2 years", new DateOnly(2025, 3, 1), "Geyser"), (task.Title, task.Notes, task.LastCompletedOn, task.FixtureName));
+    }
+
+    [Fact]
+    public async Task Dashboard_ShowsRecentPurchasesAndRoomCompletion()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var floor = await CreateFloorAsync(client, property.Id);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        await client.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, null, null, "New TV", "Electronics", null, null, null, null, today.AddDays(-3), 9000m, null, null, null));
+        await client.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, null, null, "Old sofa", "Furniture", null, null, null, null, today.AddYears(-2), 5000m, null, null, null));
+
+        var complete = (await (await client.PostAsJsonAsync("/api/rooms", new RoomInput(floor.Id, "Kitchen", null, 12m, null, null, null, null, null, "Tile", "Paint", null, null, null, null, null, null, null))).Content.ReadFromJsonAsync<RoomDto>())!;
+        await client.PostAsJsonAsync($"/api/rooms/{complete.Id}/surfaces", SurfaceFor(complete.Id, "Wall", "wall"));
+        await client.PostAsJsonAsync($"/api/rooms/{complete.Id}/photos", new PhotoMetadataInput("kitchen.jpg", null, 0));
+        await CreateRoomAsync(client, floor.Id, "Empty room");
+
+        var dashboard = (await client.GetFromJsonAsync<DashboardDto>("/api/dashboard"))!;
+        Assert.Equal("New TV", Assert.Single(dashboard.RecentPurchases!).Name);
+        Assert.Equal((1, 2, 50), (dashboard.RoomsComplete, dashboard.RoomCount, dashboard.RoomCompletionPercent));
+
+        var completion = (await client.GetFromJsonAsync<List<RoomCompletionDto>>("/api/rooms/completion"))!;
+        Assert.Equal(["dimensions", "flooring", "wall finish", "surfaces", "photos"], completion.First(x => x.RoomId != complete.Id).Missing);
+        Assert.Empty(completion.Single(x => x.RoomId == complete.Id).Missing);
+    }
+
+    [Fact]
+    public async Task ChangingAssetValue_AddsValuedHistoryEntry()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var asset = (await (await client.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, null, null, "Ring", "Jewellery", null, null, null, null, null, null, 1000m, null, null))).Content.ReadFromJsonAsync<AssetDto>())!;
+
+        await client.PutAsJsonAsync($"/api/assets/{asset.Id}", new AssetInput(property.Id, null, null, "Ring", "Jewellery", null, null, null, null, null, null, 1500m, null, "Revalued"));
+        await client.PutAsJsonAsync($"/api/assets/{asset.Id}", new AssetInput(property.Id, null, null, "Ring", "Jewellery", null, null, null, null, null, null, 1500m, null, "Notes only"));
+
+        var history = (await client.GetFromJsonAsync<List<AssetEventDto>>($"/api/assets/{asset.Id}/history"))!;
+        Assert.Equal("Value 1000.00 → 1500.00", Assert.Single(history, x => x.Kind == "Valued").Description);
+    }
+
+    [Fact]
+    public async Task Contacts_CrudValidationLookupsSearchAndBackup()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, (await source.PostAsJsonAsync("/api/contacts", new ContactInput("Bob", null, "Wizard", null, null, null, null))).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await source.PostAsJsonAsync("/api/contacts", new ContactInput("Bob", null, "Installer", null, "not-an-email", null, null))).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await source.PostAsJsonAsync("/api/contacts", new ContactInput("Bob", null, "Installer", null, null, "javascript:alert(1)", null))).StatusCode);
+            var bob = (await (await source.PostAsJsonAsync("/api/contacts", new ContactInput(" Bob Builder ", "CoolAir", "Installer", "021 555 0101", "bob@coolair.example", "https://coolair.example", "Aircon specialist"))).Content.ReadFromJsonAsync<ContactDto>())!;
+            Assert.Equal("Bob Builder", bob.Name);
+            var updated = (await (await source.PutAsJsonAsync($"/api/contacts/{bob.Id}", new ContactInput("Bob Builder", "CoolAir", "Service provider", "021 555 0101", null, null, null))).Content.ReadFromJsonAsync<ContactDto>())!;
+            Assert.Equal("Service provider", updated.Kind);
+
+            var property = await CreatePropertyAsync(source);
+            await source.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, null, null, "TV", "Electronics", null, "Samsung", null, null, null, null, null, null, null));
+            var lookups = (await source.GetFromJsonAsync<LookupsDto>("/api/lookups"))!;
+            Assert.Equal(["Electronics"], lookups.AssetCategories);
+            Assert.Equal(["Samsung"], lookups.Brands);
+            Assert.Equal(["Bob Builder", "CoolAir"], lookups.ContactNames);
+            Assert.Equal("Bob Builder", Assert.Single((await source.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=coolair"))!, x => x.Kind == "Contact").Title);
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        for (var attempt = 0; attempt < 2; attempt++)
+            await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() });
+        var restored = Assert.Single((await target.GetFromJsonAsync<List<ContactDto>>("/api/contacts"))!);
+        Assert.Equal(HttpStatusCode.NoContent, (await target.DeleteAsync($"/api/contacts/{restored.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task OrphanSweep_RemovesOnlyOldUnreferencedFiles()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var kept = await UploadAsync(client, PngBytes, "kept.png");
+        var orphan = await UploadAsync(client, PngBytes, "orphan.png");
+        var fresh = await UploadAsync(client, PngBytes, "fresh.png");
+        await client.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput(kept.StorageKey, null, 0));
+        string PathOf(UploadedFileDto f) => Path.Combine(factory.FilesPath, f.StorageKey);
+        foreach (var file in new[] { kept, orphan }) File.SetLastWriteTimeUtc(PathOf(file), DateTime.UtcNow.AddDays(-2));
+
+        using var scope = factory.Services.CreateScope();
+        var removed = await OrphanFileSweeper.SweepAsync(scope.ServiceProvider.GetRequiredService<InventoryDbContext>(), scope.ServiceProvider.GetRequiredService<FileStore>(), DateTime.UtcNow - OrphanFileSweeper.GracePeriod);
+
+        Assert.Equal(1, removed);
+        Assert.True(File.Exists(PathOf(kept)));
+        Assert.False(File.Exists(PathOf(orphan)));
+        Assert.True(File.Exists(PathOf(fresh))); // too new: may still be waiting to be attached
     }
 
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)

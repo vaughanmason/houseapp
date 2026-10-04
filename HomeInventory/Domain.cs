@@ -304,6 +304,22 @@ public sealed class AssetEvent : IHasExternalId
     public Asset? Asset { get; set; }
 }
 
+/// <summary>A supplier, installer, contractor or service provider. Contacts are shared across properties.</summary>
+public sealed class Contact : IHasExternalId
+{
+    public static readonly string[] Kinds = ["Supplier", "Installer", "Contractor", "Service provider", "Other"];
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
+    public required string Name { get; set; }
+    public string? Company { get; set; }
+    public required string Kind { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Website { get; set; }
+    public string? Notes { get; set; }
+}
+
 public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : DbContext(options)
 {
     public DbSet<Property> Properties => Set<Property>();
@@ -323,6 +339,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<MaintenanceRecord> MaintenanceRecords => Set<MaintenanceRecord>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<AssetEvent> AssetEvents => Set<AssetEvent>();
+    public DbSet<Contact> Contacts => Set<Contact>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -422,6 +439,13 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<AssetEvent>().Property(x => x.Kind).HasMaxLength(20).IsRequired();
         model.Entity<AssetEvent>().Property(x => x.Description).HasMaxLength(1000);
         model.Entity<AssetEvent>().HasOne(x => x.Asset).WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<Contact>().Property(x => x.Name).HasMaxLength(160).IsRequired();
+        model.Entity<Contact>().Property(x => x.Company).HasMaxLength(160);
+        model.Entity<Contact>().Property(x => x.Kind).HasMaxLength(40).IsRequired();
+        model.Entity<Contact>().Property(x => x.Phone).HasMaxLength(60);
+        model.Entity<Contact>().Property(x => x.Email).HasMaxLength(200);
+        model.Entity<Contact>().Property(x => x.Website).HasMaxLength(300);
+        model.Entity<Contact>().Property(x => x.Notes).HasMaxLength(1000);
         foreach (var type in model.Model.GetEntityTypes().Select(x => x.ClrType).Where(typeof(IHasExternalId).IsAssignableFrom).ToList())
         {
             model.Entity(type).Property<string?>(nameof(IHasExternalId.ExternalId)).HasMaxLength(200);
