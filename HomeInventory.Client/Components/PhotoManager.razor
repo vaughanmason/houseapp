@@ -38,7 +38,7 @@
                             <div class="small"><strong>@photo.Caption</strong></div>
                             @if (url is null) { <div class="small text-muted text-break">@photo.StorageKey</div> }
                             else if (photo.StorageKey.EndsWith(".heic")) { <a class="small" href="@url" target="_blank">Download HEIC photo</a> }
-                            <button class="btn btn-sm btn-outline-danger mt-1" @onclick="() => DeleteAsync(photo.Id)">Delete</button>
+                            <button class="btn btn-sm btn-outline-danger mt-1" @onclick="@(() => pending = new("Delete photo", $"Delete {(string.IsNullOrWhiteSpace(photo.Caption) ? "this photo" : photo.Caption)}?", () => DeleteAsync(photo.Id)))">Delete</button>
                         </div>
                     </div>
                 </div>
@@ -47,7 +47,18 @@
     }
 </div>
 
+<ConfirmDialog Show="pending is not null" Title="@(pending?.Title ?? string.Empty)" Message="@(pending?.Message ?? string.Empty)" OnConfirm="RunPending" OnCancel="() => pending = null" />
+
 @code {
+    PendingConfirmation? pending;
+
+    async Task RunPending()
+    {
+        var action = pending;
+        pending = null;
+        await PendingConfirmation.RunAsync(action);
+    }
+
     const long MaxUploadBytes = 20 * 1024 * 1024;
 
     [Parameter, EditorRequired]

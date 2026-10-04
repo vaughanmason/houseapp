@@ -21,18 +21,19 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Rooms owned by floors with area/volume, finish notes, window/door counts, utilities/fixtures notes, and paint assignments
 - Surfaces attached to rooms with type-based metadata (wall, ceiling, flooring, trim)
 - Nested storage location hierarchy with server-computed paths (`Parent → Child`) per property
-- Assets with categories, brand/model/serial numbers, valuation, condition, archive toggle, and optional room/storage-location placement
-- Asset history: Added, Moved (from → to) and Archived/Unarchived are recorded automatically; Repaired, Serviced, Valued and Note entries are added by hand with a date, description and cost
-- Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
+- Assets with categories, brand/model/serial numbers, barcode, manual link, valuation, condition, archive toggle, and optional room/storage-location placement
+- Asset history: Added, Moved (from → to), Valued (value changes) and Archived/Unarchived are recorded automatically; Repaired, Serviced, Valued and Note entries are added by hand with a date, description and cost
+- Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installer and installation date)
 - Utilities (electrical panel, meters, solar, battery, inverter, generator, internet…) as a fixture category with provider and account/meter number. They get photos, documents and maintenance like any fixture
 - Maintenance tasks for a property or one of its fixtures/utilities: one-off or repeating every N days/months/years, with service history (date, cost, supplier, notes) and automatic next-due dates
 - Photo uploads (with thumbnails) on properties, rooms, fixtures and assets; links to externally stored files still work
 - Documents (receipts, invoices, manuals, warranties, insurance, certificates, plans) uploaded as images or PDFs, attached to a property, room, fixture, asset or maintenance task, with dates, expiry, tags and notes
 - Uploaded files live in `%LOCALAPPDATA%\HomeInventory\files` (images and PDFs only, 20 MB max, type checked from the file contents)
-- Dashboard summary metrics, category totals grouped by property currency, overdue / due-in-30-days maintenance, warranties expiring within 90 days, and active assets missing a receipt
+- Dashboard summary metrics, category totals grouped by property currency, overdue / due-in-30-days maintenance, warranties expiring within 90 days, active assets missing a receipt, recent purchases, and how completely rooms are documented
 - Insurance report: a printable schedule per property (in its currency) with totals by category and every active asset and fixture, including value, serial, location, photo count and whether a receipt is on file. Print it or save it as PDF from the browser
 - QR labels: pick storage locations and assets and print a sheet of labels. Scanning one opens a page showing what is stored in a location, or an asset's details and documents
-- Text search across assets, fixtures, storage locations, paints (with the rooms that use them) and surfaces
+- Contacts directory (suppliers, installers, contractors, service providers); contact names, brands and categories already in use are suggested in free-text fields
+- Text search across assets, fixtures, storage locations, paints (with the rooms that use them), surfaces, documents and contacts
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 - **Enhanced UI with multi-page organization** for improved user experience
 
@@ -50,15 +51,18 @@ The application uses a multi-page, component-based architecture to organize func
 | **Documents** | Receipts, manuals, warranties… | Upload and attach to a property/room/fixture/asset/maintenance task; filter by property, kind and text; expiry badges; open, edit, delete |
 | **Insurance report** | Printable insurance schedule | Property filter, totals, itemised table, Print / Save as PDF (print styles hide the app chrome) |
 | **QR labels** | Printable labels | Choose a property, select locations/assets, print a 3-per-row label sheet; labels open `/scan/location/{id}` or `/scan/asset/{id}` |
+| **Contacts** | Supplier and installer directory | Add/edit/delete with phone, email and website links; filter by kind |
 | **Paints** | Paint library and assignments | Global paint registry, assign colours to rooms, "Used in" view listing every room using a paint |
 | **Assets & Storage** | Assets and storage organization | Asset catalog with valuation, Move picker, archive/unarchive with an archived view; nested storage locations with edit/re-parent; photo management |
 
 ### Reusable Components
 
 - **CurrencyDisplay** – Format monetary values with currency codes
-- **Breadcrumb** – Navigation path context (foundation for future multi-level navigation)
+- **Breadcrumb** – Property › location trail on the QR scan pages
 - **ConfirmDialog** – Delete confirmation dialogs with customizable messaging, optional body content and a disabled-until-valid confirm button
 - **PropertySelector** – Property dropdown for filtering entity lists by property
+- **PhotoManager** – Photo upload, thumbnails and external links for any photo endpoint
+- **LookupLists** – Shared `<datalist>` suggestions (`asset-categories`, `brands`, `contact-names`)
 
 ## API Endpoints (`/api`)
 
@@ -72,7 +76,10 @@ The application uses a multi-page, component-based architecture to organize func
 | Backup | GET `/backup` (ZIP), GET `/export` (JSON), POST `/import/zip`, POST `/import/preview`, POST `/import/confirm` | ZIP restore puts files back, then returns the inventory for preview/confirm |
 | QR | GET `/qr?text=` | SVG QR code (text up to 512 characters), used by the labels page |
 | Reports | GET `/reports/insurance?propertyId=` | Insurance schedule per property; active assets and fixtures only |
-| Search | GET `/search?q=` | Assets, fixtures, storage, paints, surfaces (max 50 results) |
+| Search | GET `/search?q=` | Assets, fixtures, storage, paints, surfaces, documents, contacts (max 50 results) |
+| Contacts | GET (`kind` filter), POST, PUT/{id}, DELETE/{id} | Shared across properties |
+| Lookups | GET `/lookups` | Asset categories, brands/manufacturers and contact names in use, for suggestions |
+| Room completion | GET `/rooms/completion?propertyId=` | Per-room score and what is missing (dimensions, flooring, wall finish, surfaces, photos) |
 | Paints (library) | GET/POST/PUT/DELETE paints; `paints/{id}/usage`; `rooms/{roomId}/paints` assign colours to rooms | Usage combines assignments with painted surfaces matching the colour code, or the colour name and brand |
 | StorageLocations | GET by property, POST/PUT tree edits, DELETE (empty leaf only) | Self-referencing hierarchy scoped per property; cycles rejected |
 | Assets | GET list/filter (`archived=true/false`), GET/{id}, POST, PUT, move, archive/unarchive (no hard delete), photo CRUD | Cross-entity validation is enforced for property/floor/room references |
@@ -104,7 +111,8 @@ InventoryExport {
   MaintenanceTasks[],   // optional
   MaintenanceRecords[], // optional
   Documents[],          // optional
-  AssetEvents[]         // optional
+  AssetEvents[],        // optional
+  Contacts[]            // optional
 }
 
 ImportPreviewDto {

@@ -49,7 +49,7 @@
                                         <div class="small text-muted">@floor.Notes</div>
                                     }
                                 </div>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFloor(floor.Id)">Delete</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Delete floor", $"Delete {floor.Name}? Its rooms and their surfaces, fixtures and photos are deleted too.", () => DeleteFloor(floor.Id)))">Delete</button>
                             </li>
                         }
                     </ul>
@@ -64,7 +64,18 @@
     <div class="alert alert-danger mt-3">@error</div>
 }
 
+<ConfirmDialog Show="pending is not null" Title="@(pending?.Title ?? string.Empty)" Message="@(pending?.Message ?? string.Empty)" OnConfirm="RunPending" OnCancel="() => pending = null" />
+
 @code {
+    PendingConfirmation? pending;
+
+    async Task RunPending()
+    {
+        var action = pending;
+        pending = null;
+        await PendingConfirmation.RunAsync(action);
+    }
+
     List<PropertyDto> properties = [];
     List<FloorDto> floors = [];
 

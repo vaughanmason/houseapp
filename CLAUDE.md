@@ -28,6 +28,7 @@ dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQ
 - `HomeInventory\InventoryApi.cs` is the **entire** `/api` surface: one consolidated minimal-API module with static `ToDto`/`*Dtos` helpers at the bottom. Keep that style; don't introduce controllers, services or MediatR.
 - Search (`/api/search`) filters in SQL with `EF.Functions.Like` (escaping `%`, `_` and `\`). Only storage locations are matched in memory, because their paths are computed.
 - External package: `QRCoder` (MIT) generates label QR codes as SVG (`GET /api/qr`). Everything else uses the ASP.NET Core and EF Core packages.
+- `OrphanFileSweeper` (hosted service) removes unreferenced uploads older than 24 hours.
 - `HomeInventory.Client` is the interactive WASM UI. Pages in `Pages/` call relative `api/...` URLs with an injected `HttpClient`. Shared components live in `Components/` (`CurrencyDisplay`, `Breadcrumb`, `ConfirmDialog` with optional `ChildContent`/`ConfirmDisabled`, `PropertySelector`). Use `CurrencyDisplay` for money; don't add new formatting helpers.
 - `HomeInventory.Client\Contracts.cs` holds **all** wire records (DTOs, `*Input`, `Import*`, `InventoryExport`). The server consumes them through its project reference. Keep these, `InventoryApi.cs`, and the client pages in sync.
 - `HomeInventory.Tests` uses xUnit with `CustomWebApplicationFactory`, which replaces the DbContext with a shared in-memory SQLite connection (migrations still run against it). Tests are HTTP-level integration tests in `InventoryApiTests.cs` and `InventoryValidationTests.cs` (which has `Create*Async` helpers for building fixtures).
@@ -37,7 +38,7 @@ dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQ
 ```
 Property (Currency, Photos)
 ├── Floor
-│   └── Room            (Room.PropertyId is a denormalized copy of Floor.PropertyId; set it whenever FloorId changes)
+│   └── Room            (FloorId required; Room.PropertyId is a denormalized copy of Floor.PropertyId, so set it whenever FloorId changes)
 │       ├── Surface     (SurfaceType: wall/ceiling/flooring/trim + paint/material metadata)
 │       ├── Fixture ── FixturePhoto   (Category "Fixture" or "Utility"; utilities add Provider/AccountNumber)
 │       ├── RoomPhoto
@@ -46,6 +47,7 @@ Property (Currency, Photos)
 ├── Asset ── AssetPhoto, AssetEvent   (optional RoomId XOR StorageLocationId; AssetEvent = history)
 ├── MaintenanceTask ── MaintenanceRecord   (task optionally linked to one of the property's fixtures)
 ├── Document            (file + metadata; optionally attached to ONE room, fixture, asset or maintenance task)
+Contact                 (global supplier/installer directory, not owned by a property)
 └── PropertyPhoto
 ```
 
@@ -61,7 +63,7 @@ Every importable entity implements `IHasExternalId` (`Domain.cs`). `OnModelCreat
 - Assets are never hard-deleted. There is no delete endpoint: use `POST /assets/{id}/archive` and `/unarchive`. Dashboard, search, default listings and export only use active assets.
 - Delete behavior (from `OnModelCreating`): Property → Floors/StorageLocations/Assets/PropertyPhotos cascade. Floor → Rooms cascade. Room also has a cascading FK to Property (`Room.PropertyId`). Room → Surfaces/Fixtures/RoomPhotos/RoomPaints cascade. Fixture → photos and Asset → photos cascade. Paint → RoomPaints cascade. **Restrict:** StorageLocation.Parent, Asset.Room, Asset.StorageLocation. Delete endpoints check for dependents and return `BadRequest` first (see the property, floor, room and location delete handlers). Follow that pattern. Because `StorageLocation.Parent` is `Restrict`, deleting a whole location tree must go leaf-first (see `DELETE /properties/{id}`).
 - Handlers trim optional strings (`?.Trim()`), return `Results.ValidationProblem` for missing required fields, `Results.BadRequest("message")` for invalid cross-entity references, `NotFound` for missing route entities, and `Created($"/api/...", dto)` on POST. Status-code re-execution to `/not-found` is applied only to non-`/api` paths (`Program.cs`), so API clients get raw status codes.
-- Asset history: endpoints that create, move or (un)archive an asset must also add the matching `AssetEvent` (`Added`, `Moved` via `RecordMove`, `Archived`/`Unarchived`). Only `AssetEvent.ManualKinds` can be posted or deleted through `/assets/{id}/events`.
+- Asset history: endpoints that create, move, revalue or (un)archive an asset must also add the matching `AssetEvent` (`Added`, `Moved` via `RecordMove`, `Valued` when `CurrentValue` changes, `Archived`/`Unarchived`). Only `AssetEvent.ManualKinds` can be posted or deleted through `/assets/{id}/events`.
 - Maintenance: `IntervalValue` + `IntervalUnit` (`days`/`months`/`years`, both null for one-off tasks). `POST /maintenance/{id}/complete` adds a record and sets `DueOn = NextDue(completedOn)` (null for one-offs), unless the completion is older than `LastCompletedOn` (back-filled history doesn't move the schedule). Tasks follow their fixture's property when a fixture or room moves, and a room holding assets can't move to another property.
 - Currency is a per-property 3-letter ISO code normalized by `NormalizeCurrency` (blank → `"USD"`, invalid → `null` → validation error). Never sum money across currencies: the dashboard returns one `CurrencyTotalDto` per currency.
 
@@ -70,6 +72,7 @@ Every importable entity implements `IHasExternalId` (`Domain.cs`). `OnModelCreat
 - `dotnet-ef` 10.0.10 is pinned in `dotnet-tools.json` (`dotnet tool restore`). `InventoryDbContextModelSnapshot.cs` exists as of `20261004160308_AlignRoomsAndAddAssetExternalId`, so scaffold new migrations normally with `dotnet ef migrations add`.
 - The six migrations before that were hand-written, without designer files. Leave them alone.
 - SQLite can't add foreign keys or alter columns in place. EF turns those operations into a table rebuild (`ef_temp_*`), which needs the migration's `.Designer.cs`. Always keep the generated designer file, and review the SQL with `dotnet ef migrations script`.
+- When a migration needs data changes (`migrationBuilder.Sql`), remember that EF's SQLite provider runs table rebuilds (`AlterColumn`, `DropColumn`, `AddForeignKey`) *after* the SQL operations in the same migration, and logs a warning about it. Put data fixes that must precede the schema change in the same migration (see `SchemaCleanupAndAssetExtras`, which also shows how to generate GUIDs in SQL in EF's uppercase text format), and test against a seeded database of the previous schema.
 - Every relationship or column change needs a migration. The app migrates the user's real database on startup, so test a migration against a **copy** of `inventory.db` (`dotnet ef database update --connection "Data Source=<copy>"`) before running the app.
 
 ## Import/export contract
@@ -83,4 +86,5 @@ Every importable entity implements `IHasExternalId` (`Domain.cs`). `OnModelCreat
 ## When changing things
 
 - For a new or changed endpoint, update `Contracts.cs`, `InventoryApi.cs`, the client page, the README API table, and add or extend a test.
+- Destructive buttons go through `ConfirmDialog`. Pages hold a `PendingConfirmation? pending` and run it from `OnConfirm`.
 - Known bugs and planned modules are tracked in `documents/OUTSTANDING_WORK.md`. Check it before starting work and update it when you fix something.

@@ -3,6 +3,8 @@
 
 <PageTitle>@(title ?? "Scanned label")</PageTitle>
 
+<Breadcrumb PathSegments="trail" />
+
 @if (notFound)
 {
     <div class="alert alert-warning">This label points to something that no longer exists.</div>
@@ -73,10 +75,25 @@ else
     List<DocumentDto> documents = [];
     string? title;
     bool loaded, notFound;
+    List<Breadcrumb.BreadcrumbItem> trail = [];
+
+    // Property › parent locations › item, each location linking to its own scan page.
+    async Task BuildTrailAsync(Guid propertyId, Guid? locationId, List<StorageLocationDto> allLocations, string? finalLabel)
+    {
+        var properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        trail = [new() { Label = properties.FirstOrDefault(p => p.Id == propertyId)?.Name ?? "Property", Url = "properties" }];
+        var chain = new List<StorageLocationDto>();
+        var visited = new HashSet<Guid>();
+        for (var current = allLocations.FirstOrDefault(l => l.Id == locationId); current is not null && visited.Add(current.Id); current = allLocations.FirstOrDefault(l => l.Id == current.ParentId))
+            chain.Insert(0, current);
+        trail.AddRange(chain.Select(l => new Breadcrumb.BreadcrumbItem { Label = l.Name, Url = $"scan/location/{l.Id}" }));
+        if (finalLabel is not null) trail.Add(new() { Label = finalLabel });
+    }
 
     protected override async Task OnParametersSetAsync()
     {
         loaded = notFound = false;
+        trail = [];
         location = null; asset = null;
         if (Kind == "location")
         {
@@ -88,6 +105,7 @@ else
                 title = location.Name;
                 children = all.Where(x => x.ParentId == Id).OrderBy(x => x.Name).ToList();
                 contents = (await Http.GetFromJsonAsync<List<AssetDto>>($"api/assets?propertyId={location.PropertyId}&archived=false") ?? []).Where(x => x.StorageLocationId == Id).ToList();
+                await BuildTrailAsync(location.PropertyId, location.Id, all, null);
             }
         }
         else if (Kind == "asset")
@@ -99,6 +117,11 @@ else
                 asset = await response.Content.ReadFromJsonAsync<AssetDto>();
                 title = asset?.Name;
                 documents = await Http.GetFromJsonAsync<List<DocumentDto>>($"api/documents?assetId={Id}") ?? [];
+                if (asset is not null)
+                {
+                    var locations = asset.StorageLocationId is null ? [] : await Http.GetFromJsonAsync<List<StorageLocationDto>>($"api/locations?propertyId={asset.PropertyId}") ?? [];
+                    await BuildTrailAsync(asset.PropertyId, asset.StorageLocationId, locations, asset.Name);
+                }
             }
         }
         loaded = true;

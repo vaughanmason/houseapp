@@ -121,7 +121,7 @@
                                     </div>
                                     <div>
                                         <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(fixture)">Edit</button>
-                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFixture(fixture.Id)">Delete</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Delete fixture", $"Delete {fixture.Name}? Its photos and maintenance tasks are deleted too; attached documents are kept.", () => DeleteFixture(fixture.Id)))">Delete</button>
                                     </div>
                                 </div>
                             </li>
@@ -158,7 +158,18 @@
 
 <LookupLists />
 
+<ConfirmDialog Show="pending is not null" Title="@(pending?.Title ?? string.Empty)" Message="@(pending?.Message ?? string.Empty)" OnConfirm="RunPending" OnCancel="() => pending = null" />
+
 @code {
+    PendingConfirmation? pending;
+
+    async Task RunPending()
+    {
+        var action = pending;
+        pending = null;
+        await PendingConfirmation.RunAsync(action);
+    }
+
     List<RoomDto> rooms = [];
     List<FixtureDto> fixtures = [];
     List<PropertyDto> properties = [];

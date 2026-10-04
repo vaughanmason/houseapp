@@ -64,7 +64,7 @@
                         <div class="text-nowrap">
                             <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => ToggleUsage(paint.Id)">@(usagePaintId == paint.Id ? "Hide rooms" : "Used in")</button>
                             <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(paint)">Edit</button>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePaint(paint.Id)">Delete</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Delete paint", $"Delete {paint.Brand} {paint.ColorName}? It is removed from every room it is assigned to.", () => DeletePaint(paint.Id)))">Delete</button>
                         </div>
                     </li>
                 }
@@ -115,7 +115,7 @@
                                 <div class="small text-muted">@item.ColorCode @item.Finish</div>
                                 <div class="small text-muted">Surface: @item.Surface</div>
                             </div>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveRoomPaint(item.PaintId)">Remove</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Remove paint from room", $"Remove {item.Brand} {item.ColorName} from this room?", () => RemoveRoomPaint(item.PaintId)))">Remove</button>
                         </li>
                     }
                 </ul>
@@ -133,7 +133,18 @@
     <div class="alert alert-danger mt-3">@error</div>
 }
 
+<ConfirmDialog Show="pending is not null" Title="@(pending?.Title ?? string.Empty)" Message="@(pending?.Message ?? string.Empty)" OnConfirm="RunPending" OnCancel="() => pending = null" />
+
 @code {
+    PendingConfirmation? pending;
+
+    async Task RunPending()
+    {
+        var action = pending;
+        pending = null;
+        await PendingConfirmation.RunAsync(action);
+    }
+
     List<PaintDto> paints = [];
     List<RoomDto> rooms = [];
     List<RoomPaintDto> roomPaints = [];

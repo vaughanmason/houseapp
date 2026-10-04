@@ -102,7 +102,7 @@
                                         </div>
                                         <div>
                                             <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(room)">Edit</button>
-                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteRoom(room.Id)">Delete</button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Delete room", $"Delete {room.Name}? Its surfaces, fixtures, photos and paint assignments are deleted too.", () => DeleteRoom(room.Id)))">Delete</button>
                                         </div>
                                     </div>
                                 </li>
@@ -207,7 +207,7 @@
                             </div>
                             <div class="text-nowrap">
                                 <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditSurface(surface)">Edit</button>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurface(surface.Id)">Delete</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Delete surface", $"Delete {surface.Name}?", () => DeleteSurface(surface.Id)))">Delete</button>
                             </div>
                         </li>
                     }
@@ -229,7 +229,18 @@
 
 <LookupLists />
 
+<ConfirmDialog Show="pending is not null" Title="@(pending?.Title ?? string.Empty)" Message="@(pending?.Message ?? string.Empty)" OnConfirm="RunPending" OnCancel="() => pending = null" />
+
 @code {
+    PendingConfirmation? pending;
+
+    async Task RunPending()
+    {
+        var action = pending;
+        pending = null;
+        await PendingConfirmation.RunAsync(action);
+    }
+
     List<PropertyDto> properties = [];
     List<FloorDto> floors = [];
     List<RoomDto> rooms = [];

@@ -171,7 +171,7 @@
                                                 <strong>@item.OccurredOn.ToString("yyyy-MM-dd")</strong> · @item.Kind
                                                 @if (!string.IsNullOrEmpty(item.Description)) { <span> — @item.Description</span> }
                                                 @if (item.Cost is not null) { <span> · <CurrencyDisplay Value="item.Cost" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" /></span> }
-                                                @if (ManualEventKinds.Contains(item.Kind)) { <button class="btn btn-link btn-sm p-0 ms-1 text-danger" @onclick="() => DeleteEvent(asset.Id, item.Id)">remove</button> }
+                                                @if (ManualEventKinds.Contains(item.Kind)) { <button class="btn btn-link btn-sm p-0 ms-1 text-danger" @onclick="@(() => pending = new("Remove history entry", $"Remove the {item.Kind} entry from {item.OccurredOn:yyyy-MM-dd}?", () => DeleteEvent(asset.Id, item.Id)))">remove</button> }
                                             </li>
                                         }
                                     </ul>
@@ -233,7 +233,7 @@
                                 </div>
                                 <div class="text-nowrap">
                                     <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditLocation(location)">Edit</button>
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStorageLocation(location.Id)">Delete</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="@(() => pending = new("Delete storage location", $"Delete {location.Path}?", () => DeleteStorageLocation(location.Id)))">Delete</button>
                                 </div>
                             </li>
                         }
@@ -269,7 +269,18 @@
 
 <LookupLists />
 
+<ConfirmDialog Show="pending is not null" Title="@(pending?.Title ?? string.Empty)" Message="@(pending?.Message ?? string.Empty)" OnConfirm="RunPending" OnCancel="() => pending = null" />
+
 @code {
+    PendingConfirmation? pending;
+
+    async Task RunPending()
+    {
+        var action = pending;
+        pending = null;
+        await PendingConfirmation.RunAsync(action);
+    }
+
     List<PropertyDto> properties = [];
     List<FloorDto> floors = [];
     List<RoomDto> rooms = [];
