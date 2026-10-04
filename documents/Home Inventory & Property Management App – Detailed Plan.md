@@ -29,7 +29,7 @@ Property
 ```
 Everything belongs somewhere.  
 
-Implementation status (2026-10-04): Modules 1–5, 8 (Documents, except OCR), 9 (Photos), 10 (Maintenance), 11 (Utilities) and 12 (Paint Library) are implemented. Modules 6, 7, 15 and 17 are partially implemented. Modules 13, 14 and 16 are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
+Implementation status (2026-10-04): Modules 1–5, 8 (Documents, except OCR), 9 (Photos), 10 (Maintenance), 11 (Utilities), 12 (Paint Library) and 13 (Asset History) are implemented. Modules 6, 7, 15 and 17 are partially implemented. Modules 14 and 16 are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
   
 ⸻  
   

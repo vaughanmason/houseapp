@@ -523,6 +523,7 @@ public static class InventoryApi
             if (error is not null) return Results.BadRequest(error);
             var entity = NewAsset(input);
             db.Assets.Add(entity);
+            db.AssetEvents.Add(new AssetEvent { AssetId = entity.Id, OccurredOn = entity.PurchaseDate ?? Today(), Kind = "Added", Description = entity.PurchaseDate is null ? "Added to the inventory" : "Bought", Cost = entity.PurchasePrice });
             await db.SaveChangesAsync();
             return Results.Created($"/api/assets/{entity.Id}", (await AssetDtos(db, input.PropertyId, false)).Single(x => x.Id == entity.Id));
         });
@@ -532,7 +533,9 @@ public static class InventoryApi
             if (entity is null) return Results.NotFound();
             var error = await ValidateAsset(input, db);
             if (error is not null) return Results.BadRequest(error);
+            var (fromRoom, fromLocation) = (entity.RoomId, entity.StorageLocationId);
             Apply(input, entity);
+            await RecordMove(db, entity, fromRoom, fromLocation);
             await db.SaveChangesAsync();
             return Results.Ok((await AssetDtos(db, input.PropertyId, entity.IsArchived)).Single(x => x.Id == id));
         });
@@ -543,8 +546,10 @@ public static class InventoryApi
             if (input.RoomId is not null && input.StorageLocationId is not null) return Results.BadRequest("Choose either a room or a storage location, not both.");
             if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == entity.PropertyId)) return Results.BadRequest("Room must be in the asset property.");
             if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == entity.PropertyId)) return Results.BadRequest("Storage location must be in the asset property.");
+            var (fromRoom, fromLocation) = (entity.RoomId, entity.StorageLocationId);
             entity.RoomId = input.RoomId;
             entity.StorageLocationId = input.StorageLocationId;
+            await RecordMove(db, entity, fromRoom, fromLocation);
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
@@ -552,6 +557,7 @@ public static class InventoryApi
         {
             var entity = await db.Assets.FindAsync(id);
             if (entity is null) return Results.NotFound();
+            if (!entity.IsArchived) db.AssetEvents.Add(new AssetEvent { AssetId = id, OccurredOn = Today(), Kind = "Archived" });
             entity.IsArchived = true;
             await db.SaveChangesAsync();
             return Results.NoContent();
@@ -560,7 +566,34 @@ public static class InventoryApi
         {
             var entity = await db.Assets.FindAsync(id);
             if (entity is null) return Results.NotFound();
+            if (entity.IsArchived) db.AssetEvents.Add(new AssetEvent { AssetId = id, OccurredOn = Today(), Kind = "Unarchived" });
             entity.IsArchived = false;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+        api.MapGet("/assets/{id:guid}/history", async (Guid id, InventoryDbContext db) =>
+        {
+            if (!await db.Assets.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            var events = await db.AssetEvents.Where(x => x.AssetId == id).ToListAsync();
+            return Results.Ok(events.OrderByDescending(x => x.OccurredOn).ThenByDescending(x => x.Kind == "Added" ? 0 : 1)
+                .Select(x => new AssetEventDto(x.Id, x.AssetId, x.OccurredOn, x.Kind, x.Description, x.Cost)).ToList());
+        });
+        api.MapPost("/assets/{id:guid}/events", async (Guid id, AssetEventInput input, InventoryDbContext db) =>
+        {
+            if (!await db.Assets.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            // Added, Moved and (Un)archived are recorded by the app itself so the history can't contradict the asset.
+            if (!AssetEvent.ManualKinds.Contains(input.Kind)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["kind"] = [$"Kind must be one of: {string.Join(", ", AssetEvent.ManualKinds)}."] });
+            var entity = new AssetEvent { AssetId = id, OccurredOn = input.OccurredOn, Kind = input.Kind, Description = input.Description?.Trim(), Cost = input.Cost };
+            db.AssetEvents.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/assets/{id}/history", new AssetEventDto(entity.Id, id, entity.OccurredOn, entity.Kind, entity.Description, entity.Cost));
+        });
+        api.MapDelete("/assets/{id:guid}/events/{eventId:guid}", async (Guid id, Guid eventId, InventoryDbContext db) =>
+        {
+            var entity = await db.AssetEvents.SingleOrDefaultAsync(x => x.Id == eventId && x.AssetId == id);
+            if (entity is null) return Results.NotFound();
+            if (!AssetEvent.ManualKinds.Contains(entity.Kind)) return Results.BadRequest("Only events entered by hand can be deleted.");
+            db.AssetEvents.Remove(entity);
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
@@ -828,6 +861,7 @@ public static class InventoryApi
             var tasks = await ExistingIds(db.MaintenanceTasks);
             var records = await ExistingIds(db.MaintenanceRecords);
             var documents = await ExistingIds(db.Documents);
+            var assetEvents = await ExistingIds(db.AssetEvents);
 
             foreach (var property in inventory.Properties.Where(x => !properties.ContainsKey(x.ExternalId)))
             {
@@ -955,6 +989,10 @@ public static class InventoryApi
                     Title = document.Title.Trim(), Kind = document.Kind, StorageKey = document.StorageKey.Trim(), FileName = document.FileName, ContentType = document.ContentType, SizeBytes = document.SizeBytes,
                     DocumentDate = document.DocumentDate, ExpiresOn = document.ExpiresOn, Tags = document.Tags?.Trim(), Notes = document.Notes?.Trim()
                 });
+
+            // Skipped duplicate assets map to the existing asset, so their history is merged rather than lost.
+            foreach (var assetEvent in (inventory.AssetEvents ?? []).Where(x => !assetEvents.ContainsKey(x.ExternalId) && assets.ContainsKey(x.AssetExternalId)))
+                db.AssetEvents.Add(new AssetEvent { ExternalId = assetEvent.ExternalId, AssetId = assets[assetEvent.AssetExternalId], OccurredOn = assetEvent.OccurredOn, Kind = assetEvent.Kind, Description = assetEvent.Description?.Trim(), Cost = assetEvent.Cost });
 
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
@@ -1113,6 +1151,15 @@ public static class InventoryApi
             .Select(x => new DocumentDto(x.Id, x.PropertyId, x.RoomId, x.FixtureId, x.AssetId, x.MaintenanceTaskId, x.Title, x.Kind, x.StorageKey, x.FileName, x.ContentType, x.SizeBytes, x.DocumentDate, x.ExpiresOn, x.Tags, x.Notes, x.Property?.Name ?? "", AttachedTo(x)))
             .ToList();
     }
+    // Adds a Moved event describing where the asset went, when its room or storage location actually changed.
+    static async Task RecordMove(InventoryDbContext db, Asset asset, Guid? fromRoom, Guid? fromLocation)
+    {
+        if (fromRoom == asset.RoomId && fromLocation == asset.StorageLocationId) return;
+        var rooms = await RoomPaths(db);
+        var locations = (await LocationDtos(db, asset.PropertyId)).ToDictionary(x => x.Id, x => x.Path);
+        string Label(Guid? room, Guid? location) => room is Guid r ? rooms.GetValueOrDefault(r) ?? "a room" : location is Guid l ? locations.GetValueOrDefault(l) ?? "storage" : "no location";
+        db.AssetEvents.Add(new AssetEvent { AssetId = asset.Id, OccurredOn = Today(), Kind = "Moved", Description = $"{Label(fromRoom, fromLocation)} → {Label(asset.RoomId, asset.StorageLocationId)}" });
+    }
     static async Task<Dictionary<Guid, string>> RoomPaths(InventoryDbContext db) =>
         await db.Rooms.Include(x => x.Floor).ThenInclude(x => x!.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
     // Rooms using a paint: explicit library assignments plus painted surfaces whose colour code, or colour name and brand, match.
@@ -1165,6 +1212,7 @@ public static class InventoryApi
         var tasks = await db.MaintenanceTasks.ToListAsync();
         var records = await db.MaintenanceRecords.ToListAsync();
         var documents = await db.Documents.ToListAsync();
+        var assetEvents = await db.AssetEvents.ToListAsync();
         // Records keep the backup ID they were imported with, so backup → restore → backup cycles produce the same IDs.
         static string Ext(IHasExternalId x) => x.ExternalId ?? x.Id.ToString();
         var propertyIds = props.ToDictionary(x => x.Id, Ext);
@@ -1192,7 +1240,9 @@ public static class InventoryApi
             tasks.Select(x => new ImportMaintenanceTask(Ext(x), propertyIds[x.PropertyId], x.FixtureId is Guid fixtureId ? fixtureIds[fixtureId] : null, x.Title, x.IntervalValue, x.IntervalUnit, x.DueOn, x.LastCompletedOn, x.Supplier, x.EstimatedCost, x.Notes)).ToList(),
             records.Select(x => new ImportMaintenanceRecord(Ext(x), taskIds[x.TaskId], x.CompletedOn, x.Cost, x.Supplier, x.Notes)).ToList(),
             // Documents attached to an archived asset (not exported) fall back to property level in the backup.
-            documents.Select(x => new ImportDocument(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid r ? roomIds[r] : null, x.FixtureId is Guid f ? fixtureIds[f] : null, x.AssetId is Guid a && assetIds.TryGetValue(a, out var assetExt) ? assetExt : null, x.MaintenanceTaskId is Guid t ? taskIds[t] : null, x.Title, x.Kind, x.StorageKey, x.FileName, x.ContentType, x.SizeBytes, x.DocumentDate, x.ExpiresOn, x.Tags, x.Notes)).ToList());
+            documents.Select(x => new ImportDocument(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid r ? roomIds[r] : null, x.FixtureId is Guid f ? fixtureIds[f] : null, x.AssetId is Guid a && assetIds.TryGetValue(a, out var assetExt) ? assetExt : null, x.MaintenanceTaskId is Guid t ? taskIds[t] : null, x.Title, x.Kind, x.StorageKey, x.FileName, x.ContentType, x.SizeBytes, x.DocumentDate, x.ExpiresOn, x.Tags, x.Notes)).ToList(),
+            // History of archived assets stays out, like the assets themselves.
+            assetEvents.Where(x => assetIds.ContainsKey(x.AssetId)).Select(x => new ImportAssetEvent(Ext(x), assetIds[x.AssetId], x.OccurredOn, x.Kind, x.Description, x.Cost)).ToList());
     }
     // Maps every existing row of one type by its backup ID and its database ID, so imports can recognise records they already hold.
     static async Task<Dictionary<string, Guid>> ExistingIds<T>(IQueryable<T> rows) where T : class, IHasExternalId
@@ -1218,10 +1268,11 @@ public static class InventoryApi
         var tasks = i.MaintenanceTasks ?? [];
         var records = i.MaintenanceRecords ?? [];
         var documents = i.Documents ?? [];
+        var assetEvents = i.AssetEvents ?? [];
         var ids = i.Properties.Select(x => x.ExternalId).Concat(i.Floors.Select(x => x.ExternalId)).Concat(i.Rooms.Select(x => x.ExternalId)).Concat(i.Surfaces.Select(x => x.ExternalId))
             .Concat(i.StorageLocations.Select(x => x.ExternalId)).Concat(i.Assets.Select(x => x.ExternalId)).Concat(i.PropertyPhotos.Select(x => x.ExternalId)).Concat(fixtures.Select(x => x.ExternalId))
             .Concat(assetPhotos.Select(x => x.ExternalId)).Concat(paints.Select(x => x.ExternalId)).Concat(roomPaints.Select(x => x.ExternalId)).Concat(roomPhotos.Select(x => x.ExternalId))
-            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).Concat(documents.Select(x => x.ExternalId)).ToList();
+            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).Concat(documents.Select(x => x.ExternalId)).Concat(assetEvents.Select(x => x.ExternalId)).ToList();
         if (ids.Any(string.IsNullOrWhiteSpace) || ids.Count != ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");
         var propIds = i.Properties.Select(x => x.ExternalId).ToHashSet();
         var floorIds = i.Floors.Select(x => x.ExternalId).ToHashSet();
@@ -1255,6 +1306,8 @@ public static class InventoryApi
             errors.Add("Documents must reference an imported property and, if attached, an imported room, fixture, asset or maintenance task.");
         if (documents.Any(x => new[] { x.RoomExternalId, x.FixtureExternalId, x.AssetExternalId, x.MaintenanceTaskExternalId }.Count(y => y is not null) > 1))
             errors.Add("A document can be attached to at most one room, fixture, asset or maintenance task.");
+        if (assetEvents.Any(x => !assetIds.Contains(x.AssetExternalId) || !AssetEvent.AutomaticKinds.Contains(x.Kind) && !AssetEvent.ManualKinds.Contains(x.Kind)))
+            errors.Add("Asset events must reference an imported asset and use a known kind.");
         if (i.Floors.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Rooms.Any(x => !floorIds.Contains(x.FloorExternalId)) || i.StorageLocations.Any(x => !propIds.Contains(x.PropertyExternalId))
             || i.Assets.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.PropertyPhotos.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Surfaces.Any(x => !roomIds.Contains(x.RoomExternalId))
             || fixtures.Any(x => !roomIds.Contains(x.RoomExternalId)) || assetPhotos.Any(x => !assetIds.Contains(x.AssetExternalId)) || roomPhotos.Any(x => !roomIds.Contains(x.RoomExternalId))
@@ -1275,7 +1328,7 @@ public static class InventoryApi
             + await CountExisting(db.AssetPhotos, assetPhotos.Select(x => x.ExternalId)) + await CountExisting(db.RoomPhotos, roomPhotos.Select(x => x.ExternalId))
             + await CountExisting(db.FixturePhotos, fixturePhotos.Select(x => x.ExternalId))
             + await CountExisting(db.MaintenanceTasks, tasks.Select(x => x.ExternalId)) + await CountExisting(db.MaintenanceRecords, records.Select(x => x.ExternalId))
-            + await CountExisting(db.Documents, documents.Select(x => x.ExternalId));
+            + await CountExisting(db.Documents, documents.Select(x => x.ExternalId)) + await CountExisting(db.AssetEvents, assetEvents.Select(x => x.ExternalId));
         var photoCount = i.PropertyPhotos.Count + assetPhotos.Count + roomPhotos.Count + fixturePhotos.Count;
         return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount, existingCount, tasks.Count, documents.Count);
     }

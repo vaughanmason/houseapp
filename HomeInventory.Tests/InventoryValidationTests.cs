@@ -259,7 +259,7 @@ public sealed class InventoryValidationTests
         var afterFirst = (await target.GetFromJsonAsync<InventoryExport>("/api/export"))!;
 
         var preview = (await (await target.PostAsJsonAsync("/api/import/preview", backup)).Content.ReadFromJsonAsync<ImportPreviewDto>())!;
-        Assert.Equal(13, preview.ExistingRecords); // every record except the room-paint link, which has no backup ID of its own
+        Assert.Equal(14, preview.ExistingRecords); // every record (including the asset's automatic "Added" event) except the room-paint link, which has no backup ID of its own
         Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = preview.DuplicateExternalIds })).StatusCode);
         var afterSecond = (await target.GetFromJsonAsync<InventoryExport>("/api/export"))!;
         AssertSameIds(afterFirst, afterSecond);
@@ -781,6 +781,48 @@ public sealed class InventoryValidationTests
         Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
         var restored = Assert.Single((await target.GetFromJsonAsync<List<FixtureDto>>("/api/fixtures?category=utility"))!);
         Assert.Equal(("Utility", "City Power", "ACC-42"), (restored.Category, restored.Provider, restored.AccountNumber));
+    }
+
+    [Fact]
+    public async Task AssetHistory_RecordsKeyEventsAndManualEntries()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var lounge = await CreateRoomAsync(source, (await CreateFloorAsync(source, property.Id)).Id, "Lounge");
+            var garage = await CreateLocationAsync(source, property.Id, null, "Garage");
+            var tv = await (await source.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, lounge.Id, null, "TV", "Electronics", null, null, null, null, new DateOnly(2024, 5, 1), 9000m, null, null, null))).Content.ReadFromJsonAsync<AssetDto>();
+
+            await source.PostAsJsonAsync($"/api/assets/{tv!.Id}/move", new AssetMoveInput(null, garage.Id));
+            await source.PostAsJsonAsync($"/api/assets/{tv.Id}/move", new AssetMoveInput(null, garage.Id)); // no change, no event
+            var repair = await source.PostAsJsonAsync($"/api/assets/{tv.Id}/events", new AssetEventInput(new DateOnly(2025, 2, 3), "Repaired", "New backlight", 1200m));
+            Assert.Equal(HttpStatusCode.Created, repair.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await source.PostAsJsonAsync($"/api/assets/{tv.Id}/events", new AssetEventInput(new DateOnly(2025, 2, 3), "Moved", null, null))).StatusCode);
+            await source.PostAsync($"/api/assets/{tv.Id}/archive", null);
+            await source.PostAsync($"/api/assets/{tv.Id}/unarchive", null);
+
+            var history = (await source.GetFromJsonAsync<List<AssetEventDto>>($"/api/assets/{tv.Id}/history"))!;
+            Assert.Equal(["Added", "Archived", "Moved", "Repaired", "Unarchived"], history.Select(x => x.Kind).Order());
+            var added = Assert.Single(history, x => x.Kind == "Added");
+            Assert.Equal((new DateOnly(2024, 5, 1), 9000m), (added.OccurredOn, added.Cost));
+            Assert.Equal("Main House · Ground Floor · Lounge → Garage", Assert.Single(history, x => x.Kind == "Moved").Description);
+
+            // Automatic events can't be removed; manual ones can.
+            Assert.Equal(HttpStatusCode.BadRequest, (await source.DeleteAsync($"/api/assets/{tv.Id}/events/{added.Id}")).StatusCode);
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+        Assert.Equal(5, backup.AssetEvents!.Count);
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        for (var attempt = 0; attempt < 2; attempt++)
+            Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
+        var restoredTv = Assert.Single((await target.GetFromJsonAsync<List<AssetDto>>("/api/assets?archived=false"))!);
+        var restored = (await target.GetFromJsonAsync<List<AssetEventDto>>($"/api/assets/{restoredTv.Id}/history"))!;
+        Assert.Equal(5, restored.Count);
+        Assert.Equal(1200m, Assert.Single(restored, x => x.Kind == "Repaired").Cost);
     }
 
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)

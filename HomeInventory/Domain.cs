@@ -288,6 +288,22 @@ public sealed class Document : IHasExternalId
     public MaintenanceTask? MaintenanceTask { get; set; }
 }
 
+/// <summary>A key event in an asset's life: recorded automatically (added, moved, archived) or entered by hand (repaired, serviced, valued, note).</summary>
+public sealed class AssetEvent : IHasExternalId
+{
+    public static readonly string[] AutomaticKinds = ["Added", "Moved", "Archived", "Unarchived"];
+    public static readonly string[] ManualKinds = ["Repaired", "Serviced", "Valued", "Note"];
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
+    public Guid AssetId { get; set; }
+    public DateOnly OccurredOn { get; set; }
+    public required string Kind { get; set; }
+    public string? Description { get; set; }
+    public decimal? Cost { get; set; }
+    public Asset? Asset { get; set; }
+}
+
 public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : DbContext(options)
 {
     public DbSet<Property> Properties => Set<Property>();
@@ -306,6 +322,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
     public DbSet<MaintenanceRecord> MaintenanceRecords => Set<MaintenanceRecord>();
     public DbSet<Document> Documents => Set<Document>();
+    public DbSet<AssetEvent> AssetEvents => Set<AssetEvent>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -399,6 +416,9 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<Document>().HasOne(x => x.Asset).WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<Document>().HasOne(x => x.MaintenanceTask).WithMany().HasForeignKey(x => x.MaintenanceTaskId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<Document>().HasIndex(x => x.ExpiresOn);
+        model.Entity<AssetEvent>().Property(x => x.Kind).HasMaxLength(20).IsRequired();
+        model.Entity<AssetEvent>().Property(x => x.Description).HasMaxLength(1000);
+        model.Entity<AssetEvent>().HasOne(x => x.Asset).WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.Cascade);
         foreach (var type in model.Model.GetEntityTypes().Select(x => x.ClrType).Where(typeof(IHasExternalId).IsAssignableFrom).ToList())
         {
             model.Entity(type).Property<string?>(nameof(IHasExternalId.ExternalId)).HasMaxLength(200);

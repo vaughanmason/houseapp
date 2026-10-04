@@ -21,6 +21,7 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Surfaces attached to rooms with type-based metadata (wall, ceiling, flooring, trim)
 - Nested storage location hierarchy with server-computed paths (`Parent → Child`) per property
 - Assets with categories, brand/model/serial numbers, valuation, condition, archive toggle, and optional room/storage-location placement
+- Asset history: Added, Moved (from → to) and Archived/Unarchived are recorded automatically; Repaired, Serviced, Valued and Note entries are added by hand with a date, description and cost
 - Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
 - Utilities (electrical panel, meters, solar, battery, inverter, generator, internet…) as a fixture category with provider and account/meter number. They get photos, documents and maintenance like any fixture
 - Maintenance tasks for a property or one of its fixtures/utilities: one-off or repeating every N days/months/years, with service history (date, cost, supplier, notes) and automatic next-due dates
@@ -73,6 +74,7 @@ The application uses a multi-page, component-based architecture to organize func
 | Files | POST `/files` (multipart `file`), GET `/files/{key}` | Images (JPEG/PNG/GIF/WebP/HEIC) and PDFs up to 20 MB; returns a storage key for photos and documents |
 | Documents | GET (property/room/fixture/asset/task/kind filters), POST, PUT/{id}, DELETE/{id} | Attached to at most one target in the same property; deleting the target keeps the document at property level |
 | FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
+| AssetHistory | GET `/assets/{id}/history`, POST `/assets/{id}/events`, DELETE `/assets/{id}/events/{eventId}` | Manual kinds only (Repaired, Serviced, Valued, Note); automatic events can't be added or removed by hand |
 | AssetPhotos | GET/POST/DELETE under `/assets/{id}/photos` | External photo references for assets |
 
 ## Import Contract (`schemaVersion: 1`)
@@ -94,7 +96,8 @@ InventoryExport {
   FixturePhotos[],  // optional
   MaintenanceTasks[],   // optional
   MaintenanceRecords[], // optional
-  Documents[]           // optional
+  Documents[],          // optional
+  AssetEvents[]         // optional
 }
 
 ImportPreviewDto {

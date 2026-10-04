@@ -12,6 +12,7 @@ public sealed record PaintUsageDto(Guid RoomId, string RoomPath, string? Surface
 public sealed record RoomPaintDto(Guid PaintId, string Brand, string ColorName, string? ColorCode, string? Finish, string? Notes, int SortOrder, string? Surface);
 public sealed record StorageLocationDto(Guid Id, Guid PropertyId, Guid? ParentId, string Name, string? Type, string Path);
 public sealed record AssetDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? StorageLocationId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes, bool IsArchived, string? LocationPath);
+public sealed record AssetEventDto(Guid Id, Guid AssetId, DateOnly OccurredOn, string Kind, string? Description, decimal? Cost);
 public sealed record AssetPhotoDto(Guid Id, string StorageKey, string? Caption, int SortOrder);
 public sealed record DashboardDto(int AssetCount, int FixtureCount, IReadOnlyList<CurrencyTotalDto> Totals, int MaintenanceOverdue = 0, int MaintenanceDueSoon = 0, int WarrantiesExpiring = 0, int AssetsMissingReceipts = 0);
 public sealed record UploadedFileDto(string StorageKey, string FileName, string ContentType, long SizeBytes);
@@ -34,12 +35,13 @@ public sealed record PaintInput(string Brand, string ColorName, string? ColorCod
 public sealed record RoomPaintInput(Guid PaintId, int SortOrder, string? Surface);
 public sealed record StorageLocationInput(Guid PropertyId, Guid? ParentId, string Name, string? Type);
 public sealed record AssetInput(Guid PropertyId, Guid? RoomId, Guid? StorageLocationId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes);
+public sealed record AssetEventInput(DateOnly OccurredOn, string Kind, string? Description, decimal? Cost);
 public sealed record AssetMoveInput(Guid? RoomId, Guid? StorageLocationId);
 public sealed record MaintenanceTaskInput(Guid PropertyId, Guid? FixtureId, string Title, int? IntervalValue, string? IntervalUnit, DateOnly? DueOn, string? Supplier, decimal? EstimatedCost, string? Notes);
 public sealed record DocumentInput(Guid PropertyId, Guid? RoomId, Guid? FixtureId, Guid? AssetId, Guid? MaintenanceTaskId, string Title, string Kind, string StorageKey, string? FileName, string? ContentType, long? SizeBytes, DateOnly? DocumentDate, DateOnly? ExpiresOn, string? Tags, string? Notes);
 public sealed record MaintenanceCompletionInput(DateOnly CompletedOn, decimal? Cost, string? Supplier, string? Notes);
 
-public sealed record InventoryExport(int SchemaVersion, List<ImportProperty> Properties, List<ImportFloor> Floors, List<ImportRoom> Rooms, List<ImportSurface> Surfaces, List<ImportStorageLocation> StorageLocations, List<ImportAsset> Assets, List<ImportPropertyPhoto> PropertyPhotos, List<ImportFixture>? Fixtures = null, List<ImportAssetPhoto>? AssetPhotos = null, List<ImportPaint>? Paints = null, List<ImportRoomPaint>? RoomPaints = null, List<ImportRoomPhoto>? RoomPhotos = null, List<ImportFixturePhoto>? FixturePhotos = null, List<ImportMaintenanceTask>? MaintenanceTasks = null, List<ImportMaintenanceRecord>? MaintenanceRecords = null, List<ImportDocument>? Documents = null);
+public sealed record InventoryExport(int SchemaVersion, List<ImportProperty> Properties, List<ImportFloor> Floors, List<ImportRoom> Rooms, List<ImportSurface> Surfaces, List<ImportStorageLocation> StorageLocations, List<ImportAsset> Assets, List<ImportPropertyPhoto> PropertyPhotos, List<ImportFixture>? Fixtures = null, List<ImportAssetPhoto>? AssetPhotos = null, List<ImportPaint>? Paints = null, List<ImportRoomPaint>? RoomPaints = null, List<ImportRoomPhoto>? RoomPhotos = null, List<ImportFixturePhoto>? FixturePhotos = null, List<ImportMaintenanceTask>? MaintenanceTasks = null, List<ImportMaintenanceRecord>? MaintenanceRecords = null, List<ImportDocument>? Documents = null, List<ImportAssetEvent>? AssetEvents = null);
 public sealed record ImportProperty(string ExternalId, string Name, string? Address, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? FloorArea, string? Notes, string? Currency = null);
 public sealed record ImportFloor(string ExternalId, string PropertyExternalId, string Name, string? Notes);
 public sealed record ImportPropertyPhoto(string ExternalId, string PropertyExternalId, string? StorageKey, string? Caption, int SortOrder);
@@ -57,4 +59,5 @@ public sealed record ImportMaintenanceTask(string ExternalId, string PropertyExt
 public sealed record ImportMaintenanceRecord(string ExternalId, string TaskExternalId, DateOnly CompletedOn, decimal? Cost, string? Supplier, string? Notes);
 public sealed record ImportDocument(string ExternalId, string PropertyExternalId, string? RoomExternalId, string? FixtureExternalId, string? AssetExternalId, string? MaintenanceTaskExternalId, string Title, string Kind, string StorageKey, string? FileName, string? ContentType, long? SizeBytes, DateOnly? DocumentDate, DateOnly? ExpiresOn, string? Tags, string? Notes);
 public sealed record ZipImportDto(InventoryExport Inventory, int FilesRestored, int FilesSkipped);
+public sealed record ImportAssetEvent(string ExternalId, string AssetExternalId, DateOnly OccurredOn, string Kind, string? Description, decimal? Cost);
 public sealed record ImportPreviewDto(bool IsValid, IReadOnlyList<string> Errors, int Properties, int Floors, int Rooms, int Surfaces, int StorageLocations, int Assets, IReadOnlyList<string> DuplicateExternalIds, int Fixtures = 0, int Paints = 0, int Photos = 0, int ExistingRecords = 0, int MaintenanceTasks = 0, int Documents = 0);

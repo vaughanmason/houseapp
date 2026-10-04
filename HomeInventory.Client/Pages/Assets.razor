@@ -108,6 +108,7 @@
                             <div class="text-nowrap">
                                 <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(asset)">Edit</button>
                                 @if (!asset.IsArchived) { <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => StartMove(asset)">Move</button> }
+                                <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => ToggleHistory(asset.Id)">History</button>
                                 @if (asset.IsArchived)
                                 {
                                     <button class="btn btn-sm btn-outline-success" @onclick="() => SetArchived(asset.Id, false)">Unarchive</button>
@@ -132,6 +133,40 @@
                                 </select>
                                 <button class="btn btn-sm btn-primary" @onclick="() => MoveAsset(asset.Id)">Move</button>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => movingAssetId = null">Cancel</button>
+                            </div>
+                        }
+                        @if (historyAssetId == asset.Id)
+                        {
+                            <div class="mt-2 border-top pt-2">
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-3">
+                                        <select class="form-select form-select-sm" @bind="eventKind">
+                                            @foreach (var kind in ManualEventKinds) { <option value="@kind">@kind</option> }
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3"><input class="form-control form-control-sm" type="date" @bind="eventDate" /></div>
+                                    <div class="col-md-4"><input class="form-control form-control-sm" @bind="eventDescription" placeholder="What happened?" /></div>
+                                    <div class="col-md-2"><input class="form-control form-control-sm" type="number" step="0.01" @bind="eventCost" placeholder="Cost" /></div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary mb-2" @onclick="() => AddEvent(asset.Id)">Add to history</button>
+                                @if (history.Count == 0)
+                                {
+                                    <div class="small text-muted">No history yet.</div>
+                                }
+                                else
+                                {
+                                    <ul class="small mb-0">
+                                        @foreach (var item in history)
+                                        {
+                                            <li>
+                                                <strong>@item.OccurredOn.ToString("yyyy-MM-dd")</strong> · @item.Kind
+                                                @if (!string.IsNullOrEmpty(item.Description)) { <span> — @item.Description</span> }
+                                                @if (item.Cost is not null) { <span> · <CurrencyDisplay Value="item.Cost" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" /></span> }
+                                                @if (ManualEventKinds.Contains(item.Kind)) { <button class="btn btn-link btn-sm p-0 ms-1 text-danger" @onclick="() => DeleteEvent(asset.Id, item.Id)">remove</button> }
+                                            </li>
+                                        }
+                                    </ul>
+                                }
                             </div>
                         }
                     </li>
@@ -237,7 +272,43 @@
     string photoAssetId = "";
     string searchQuery = "";
     bool showArchived;
-    Guid? editingLocationId, movingAssetId;
+    Guid? editingLocationId, movingAssetId, historyAssetId;
+    List<AssetEventDto> history = [];
+    static readonly string[] ManualEventKinds = ["Repaired", "Serviced", "Valued", "Note"];
+    string eventKind = "Repaired", eventDescription = "", eventCost = "";
+    DateOnly? eventDate;
+
+    async Task ToggleHistory(Guid assetId)
+    {
+        if (historyAssetId == assetId) { historyAssetId = null; return; }
+        history = await Http.GetFromJsonAsync<List<AssetEventDto>>($"api/assets/{assetId}/history") ?? [];
+        historyAssetId = assetId;
+        eventDate = DateOnly.FromDateTime(DateTime.Today);
+    }
+
+    async Task AddEvent(Guid assetId)
+    {
+        error = null;
+        if (eventDate is null) { error = "Choose the date it happened."; return; }
+        var response = await Http.PostAsJsonAsync($"api/assets/{assetId}/events", new AssetEventInput(eventDate.Value, eventKind, eventDescription, decimal.TryParse(eventCost, out var cost) ? cost : null));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        eventDescription = eventCost = "";
+        history = await Http.GetFromJsonAsync<List<AssetEventDto>>($"api/assets/{assetId}/history") ?? [];
+    }
+
+    async Task DeleteEvent(Guid assetId, Guid eventId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/assets/{assetId}/events/{eventId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        history = await Http.GetFromJsonAsync<List<AssetEventDto>>($"api/assets/{assetId}/history") ?? [];
+    }
+
+    // Moves and archive changes add history, so refresh an open timeline after them.
+    async Task RefreshHistory()
+    {
+        if (historyAssetId is Guid id) history = await Http.GetFromJsonAsync<List<AssetEventDto>>($"api/assets/{id}/history") ?? [];
+    }
     string moveTarget = "";
 
     Guid? editingAssetId;
@@ -337,6 +408,7 @@
         var response = await Http.PostAsync($"api/assets/{assetId}/{(archived ? "archive" : "unarchive")}", null);
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         await ReloadAssets();
+        await RefreshHistory();
     }
 
     void StartEditLocation(StorageLocationDto location)
@@ -403,6 +475,7 @@
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         movingAssetId = null;
         await ReloadAssets();
+        await RefreshHistory();
     }
 
     List<RoomDto> RoomsForProperty(Guid propertyId)
