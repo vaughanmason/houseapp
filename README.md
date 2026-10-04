@@ -24,7 +24,7 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
 - Photo metadata registry for external storage references on properties, rooms, fixtures, and assets
 - Dashboard summary metrics and category totals, grouped by property currency
-- Text search across asset names/categories/brands/serial numbers and fixture names/types
+- Text search across assets, fixtures, storage locations, paints (with the rooms that use them) and surfaces
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 - **Enhanced UI with multi-page organization** for improved user experience
 
@@ -34,29 +34,31 @@ The application uses a multi-page, component-based architecture to organize func
 
 | Page | Purpose | Features |
 |------|---------|----------|
-| **Properties** | Manage properties and property photos | Add/edit properties with currency selection, manage property-level photos |
+| **Properties** | Manage properties and property photos | Add/edit properties with currency selection, delete (blocked while it has assets; type the name to confirm), manage property-level photos |
 | **Floors** | Organize property floors | Create and manage floors by property with notes and sorting |
-| **Rooms** | Rooms and surface management | Complete room metadata (dimensions, finishes, utilities), surface management (wall, ceiling, flooring, trim) |
+| **Rooms** | Rooms, surfaces and room photos | Complete room metadata (dimensions, finishes, paint details, utilities); add/edit surfaces with type-specific fields (paint for wall/ceiling/trim, product and supplier for flooring); room photos |
 | **Fixtures** | Permanent room fixtures | Fixture lifecycle (purchase, installation, maintenance), financial tracking, photos, warranty info |
-| **Paints** | Paint library and assignments | Global paint registry, assign colors to room surfaces with installation date and notes |
-| **Assets & Storage** | Assets and storage organization | Asset catalog with valuation and location tracking, storage location hierarchy, asset search/filter, photo management |
+| **Paints** | Paint library and assignments | Global paint registry, assign colours to rooms, "Used in" view listing every room using a paint |
+| **Assets & Storage** | Assets and storage organization | Asset catalog with valuation, Move picker, archive/unarchive with an archived view; nested storage locations with edit/re-parent; photo management |
 
 ### Reusable Components
 
 - **CurrencyDisplay** – Format monetary values with currency codes
 - **Breadcrumb** – Navigation path context (foundation for future multi-level navigation)
-- **ConfirmDialog** – Delete confirmation dialogs with customizable messaging
+- **ConfirmDialog** – Delete confirmation dialogs with customizable messaging, optional body content and a disabled-until-valid confirm button
 - **PropertySelector** – Property dropdown for filtering entity lists by property
 
 ## API Endpoints (`/api`)
 
 | Resource | Methods | Notes |
 |----------|---------|-------|
-| Properties | GET, POST, PUT/{id} | Ownership boundary for floors/assets hierarchy |
+| Properties | GET, POST, PUT/{id}, DELETE/{id} | Ownership boundary; DELETE cascades the structure and is rejected while the property has any assets |
 | Floors | GET/POST/PUT/DELETE under properties or `/floors` | Floors belong to a property and own rooms |
 | Rooms | GET by floor/property, POST, PUT/{id}, DELETE | Rooms now live under floors |
 | Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
-| Paints (library) | GET/POST/PUT/DELETE paints; `rooms/{roomId}/paints` assign colours to room surfaces | Registry-first approach with room-specific mappings |
+| RoomPhotos | GET/POST/PUT/DELETE under `/rooms/{roomId}/photos` | External photo references for rooms |
+| Search | GET `/search?q=` | Assets, fixtures, storage, paints, surfaces (max 50 results) |
+| Paints (library) | GET/POST/PUT/DELETE paints; `paints/{id}/usage`; `rooms/{roomId}/paints` assign colours to rooms | Usage combines assignments with painted surfaces matching the colour code, or the colour name and brand |
 | StorageLocations | GET by property, POST/PUT tree edits, DELETE (empty leaf only) | Self-referencing hierarchy scoped per property; cycles rejected |
 | Assets | GET list/filter (`archived=true/false`), POST, PUT, move, archive/unarchive (no hard delete), photo CRUD | Cross-entity validation is enforced for property/floor/room references |
 | Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` | Room-scoped permanent items with type-specific metadata |

@@ -275,6 +275,105 @@ public sealed class InventoryValidationTests
         Assert.Equal("Electronics", Assert.Single(eur.Categories).Category);
     }
 
+    [Fact]
+    public async Task PaintUsage_AndSearch_FindRoomsUsingPaint()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var floor = await CreateFloorAsync(client, property.Id);
+        var lounge = await CreateRoomAsync(client, floor.Id, "Lounge");
+        var hallway = await CreateRoomAsync(client, floor.Id, "Hallway");
+        var paint = await (await client.PostAsJsonAsync("/api/paints", new PaintInput("Dulux", "Oyster White", "OW-104", "Eggshell", null))).Content.ReadFromJsonAsync<PaintDto>();
+        Assert.NotNull(paint);
+        await client.PostAsJsonAsync($"/api/rooms/{lounge.Id}/paints", new RoomPaintInput(paint.Id, 0, "North wall"));
+        await client.PostAsJsonAsync($"/api/rooms/{hallway.Id}/surfaces", SurfaceFor(hallway.Id, "East wall", "wall") with { PaintBrand = "Dulux", ColorName = "oyster white" });
+        await client.PostAsJsonAsync($"/api/rooms/{hallway.Id}/surfaces", SurfaceFor(hallway.Id, "Floor", "flooring") with { ColorName = "Oyster White", Material = "Oak" });
+
+        var usage = await client.GetFromJsonAsync<List<PaintUsageDto>>($"/api/paints/{paint.Id}/usage");
+
+        Assert.NotNull(usage);
+        Assert.Equal(2, usage.Count);
+        Assert.Contains(usage, x => x.RoomId == lounge.Id && x.Source == "Assigned" && x.Surface == "North wall");
+        Assert.Contains(usage, x => x.RoomId == hallway.Id && x.Source == "Surface" && x.Surface == "East wall");
+
+        var results = await client.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=oyster");
+        Assert.NotNull(results);
+        var paintResult = Assert.Single(results, x => x.Kind == "Paint");
+        Assert.Contains("Lounge", paintResult.LocationPath);
+        Assert.Contains("Hallway", paintResult.LocationPath);
+        Assert.Equal(2, results.Count(x => x.Kind == "Surface"));
+        Assert.Contains(await client.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=oak") ?? [], x => x.Kind == "Surface" && x.Title == "Floor");
+    }
+
+    [Fact]
+    public async Task UpdateSurface_ChangesFields()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var floor = await CreateFloorAsync(client, property.Id);
+        var room = await CreateRoomAsync(client, floor.Id);
+        var surface = await (await client.PostAsJsonAsync($"/api/rooms/{room.Id}/surfaces", SurfaceFor(room.Id, "Wall", "wall"))).Content.ReadFromJsonAsync<SurfaceDto>();
+        Assert.NotNull(surface);
+
+        var response = await client.PutAsJsonAsync($"/api/surfaces/{surface.Id}", SurfaceFor(room.Id, "North wall", "wall") with { PaintBrand = "Plascon", Coats = 2, PaintedDate = new DateOnly(2025, 3, 1) });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var surfaces = await client.GetFromJsonAsync<List<SurfaceDto>>($"/api/rooms/{room.Id}/surfaces");
+        var updated = Assert.Single(surfaces!);
+        Assert.Equal("North wall", updated.Name);
+        Assert.Equal("Plascon", updated.PaintBrand);
+        Assert.Equal(2, updated.Coats);
+        Assert.Equal(new DateOnly(2025, 3, 1), updated.PaintedDate);
+    }
+
+    [Fact]
+    public async Task DeleteProperty_BlockedWhileItHasAssets()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var asset = await CreateAssetAsync(client, property.Id, null, null, "Couch");
+        await client.PostAsync($"/api/assets/{asset.Id}/archive", null);
+
+        var response = await client.DeleteAsync($"/api/properties/{property.Id}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single((await client.GetFromJsonAsync<List<PropertyDto>>("/api/properties"))!);
+    }
+
+    [Fact]
+    public async Task DeleteProperty_CascadesStructureAndNestedStorage()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client, "Old flat");
+        var keep = await CreatePropertyAsync(client, "Home");
+        var floor = await CreateFloorAsync(client, property.Id);
+        var room = await CreateRoomAsync(client, floor.Id);
+        await client.PostAsJsonAsync($"/api/rooms/{room.Id}/surfaces", SurfaceFor(room.Id, "Wall", "wall"));
+        await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id));
+        await client.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput("front.jpg", null, 0));
+        var garage = await CreateLocationAsync(client, property.Id, null, "Garage");
+        var shelf = await CreateLocationAsync(client, property.Id, garage.Id, "Shelf");
+        await CreateLocationAsync(client, property.Id, shelf.Id, "Box");
+        await CreateLocationAsync(client, keep.Id, null, "Loft");
+
+        var response = await client.DeleteAsync($"/api/properties/{property.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal("Home", Assert.Single((await client.GetFromJsonAsync<List<PropertyDto>>("/api/properties"))!).Name);
+        Assert.Empty((await client.GetFromJsonAsync<List<FloorDto>>("/api/floors"))!);
+        Assert.Empty((await client.GetFromJsonAsync<List<RoomDto>>("/api/rooms"))!);
+        Assert.Empty((await client.GetFromJsonAsync<List<FixtureDto>>("/api/fixtures"))!);
+        Assert.Equal("Loft", Assert.Single((await client.GetFromJsonAsync<List<StorageLocationDto>>("/api/locations"))!).Name);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/properties/{property.Id}")).StatusCode);
+    }
+
+    private static SurfaceInput SurfaceFor(Guid roomId, string name, string type) =>
+        new(roomId, name, type, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 0);
+
     private static FixtureInput FixtureFor(Guid roomId) =>
         new(roomId, "Sink", "Sink", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
@@ -292,9 +391,9 @@ public sealed class InventoryValidationTests
         return (await response.Content.ReadFromJsonAsync<FloorDto>())!;
     }
 
-    private static async Task<RoomDto> CreateRoomAsync(HttpClient client, Guid floorId)
+    private static async Task<RoomDto> CreateRoomAsync(HttpClient client, Guid floorId, string name = "Lounge")
     {
-        var response = await client.PostAsJsonAsync("/api/rooms", new RoomInput(floorId, "Lounge", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+        var response = await client.PostAsJsonAsync("/api/rooms", new RoomInput(floorId, name, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<RoomDto>())!;
     }

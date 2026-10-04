@@ -8,6 +8,7 @@ public sealed record FixtureDto(Guid Id, Guid RoomId, string Name, string Type, 
 public sealed record FixturePhotoDto(Guid Id, string StorageKey, string? Caption, int SortOrder);
 public sealed record PhotoMetadataDto(Guid Id, string StorageKey, string? Caption, int SortOrder);
 public sealed record PaintDto(Guid Id, string Brand, string ColorName, string? ColorCode, string? Finish, string? Notes);
+public sealed record PaintUsageDto(Guid RoomId, string RoomPath, string? Surface, string Source);
 public sealed record RoomPaintDto(Guid PaintId, string Brand, string ColorName, string? ColorCode, string? Finish, string? Notes, int SortOrder, string? Surface);
 public sealed record StorageLocationDto(Guid Id, Guid PropertyId, Guid? ParentId, string Name, string? Type, string Path);
 public sealed record AssetDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? StorageLocationId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes, bool IsArchived, string? LocationPath);

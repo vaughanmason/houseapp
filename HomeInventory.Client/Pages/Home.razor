@@ -24,6 +24,6 @@ else
     }
 }
 <h2 class="mt-5">Find anything</h2>
-<div class="input-group"><input class="form-control" @bind="query" @bind:event="oninput" placeholder="Search assets or storage…" /><button class="btn btn-primary" @onclick="Search">Search</button></div>
+<div class="input-group"><input class="form-control" @bind="query" @bind:event="oninput" placeholder="Search assets, fixtures, storage, paints or surfaces…" /><button class="btn btn-primary" @onclick="Search">Search</button></div>
 @if (results is not null) { <ul class="list-group mt-3">@foreach (var item in results) { <li class="list-group-item"><strong>@item.Title</strong> <span class="text-muted">@item.Kind · @item.Detail @item.LocationPath</span></li> }</ul> }
 @code { DashboardDto? dashboard; string query = ""; List<SearchResultDto>? results; protected override async Task OnInitializedAsync() => dashboard = await Http.GetFromJsonAsync<DashboardDto>("api/dashboard"); async Task Search() => results = string.IsNullOrWhiteSpace(query) ? [] : await Http.GetFromJsonAsync<List<SearchResultDto>>($"api/search?q={Uri.EscapeDataString(query)}"); }

@@ -26,6 +26,26 @@ public static class InventoryApi
             if (currency is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["currency"] = ["Currency must be a three-letter ISO code."] });
             entity.Name = input.Name.Trim(); entity.Address = input.Address?.Trim(); entity.PurchaseDate = input.PurchaseDate; entity.PurchasePrice = input.PurchasePrice; entity.FloorArea = input.FloorArea; entity.Currency = currency; entity.Notes = input.Notes?.Trim(); await db.SaveChangesAsync(); return Results.Ok(ToDto(entity));
         });
+        api.MapDelete("/properties/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.Properties.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            // Assets are never deleted (archived ones included), so a property holding any must have them reassigned first.
+            var assetCount = await db.Assets.CountAsync(x => x.PropertyId == id);
+            if (assetCount > 0) return Results.BadRequest($"This property still has {assetCount} asset(s), including archived ones. Reassign them to another property before deleting it.");
+            // StorageLocation.Parent is Restrict, so remove the location tree leaf-first before the property cascade runs.
+            var locations = await db.StorageLocations.Where(x => x.PropertyId == id).ToListAsync();
+            while (locations.Count > 0)
+            {
+                var leaves = locations.Where(x => !locations.Any(y => y.ParentId == x.Id)).ToList();
+                db.StorageLocations.RemoveRange(leaves);
+                await db.SaveChangesAsync();
+                locations = locations.Except(leaves).ToList();
+            }
+            db.Properties.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
 
         api.MapGet("/properties/{id:guid}/floors", async (Guid id, InventoryDbContext db) =>
         {
@@ -375,6 +395,12 @@ public static class InventoryApi
             var entity = await db.RoomPaints.SingleOrDefaultAsync(x => x.RoomId == id && x.PaintId == paintId); if (entity is null) return Results.NotFound();
             db.RoomPaints.Remove(entity); await db.SaveChangesAsync(); return Results.NoContent();
         });
+        api.MapGet("/paints/{id:guid}/usage", async (Guid id, InventoryDbContext db) =>
+        {
+            var paint = await db.Paints.FindAsync(id);
+            if (paint is null) return Results.NotFound();
+            return Results.Ok(await PaintUsage(db, paint));
+        });
         api.MapGet("/properties/{id:guid}/photos", async (Guid id, InventoryDbContext db) =>
         {
             if (!await db.Properties.AnyAsync(x => x.Id == id)) return Results.NotFound();
@@ -548,9 +574,21 @@ public static class InventoryApi
             var assets = await AssetDtos(db, null, false);
             var fixtures = await FixtureDtos(db, db.Fixtures.AsQueryable());
             var locations = await LocationDtos(db, null);
+            var roomPaths = await RoomPaths(db);
+            var paints = await db.Paints.ToListAsync();
+            var surfaces = await db.Surfaces.ToListAsync();
+            var paintResults = new List<SearchResultDto>();
+            foreach (var paint in paints.Where(x => $"{x.Brand} {x.ColorName} {x.ColorCode} {x.Finish} {x.Notes}".ToLower().Contains(term)))
+            {
+                var usedIn = (await PaintUsage(db, paint)).Select(x => x.RoomPath).Distinct().ToList();
+                paintResults.Add(new SearchResultDto("Paint", paint.Id, $"{paint.Brand} {paint.ColorName}", string.Join(" ", new[] { paint.ColorCode, paint.Finish }.Where(x => !string.IsNullOrWhiteSpace(x))), usedIn.Count == 0 ? null : string.Join(", ", usedIn)));
+            }
+            var surfaceResults = surfaces.Where(x => $"{x.Name} {x.SurfaceType} {x.PaintBrand} {x.ColorName} {x.ColorCode} {x.Finish} {x.Material} {x.Manufacturer} {x.ProductName} {x.Notes}".ToLower().Contains(term))
+                .Select(x => new SearchResultDto("Surface", x.Id, x.Name, string.Join(" · ", new[] { x.SurfaceType, x.SurfaceType == "flooring" ? x.Material : x.PaintBrand, x.ColorName }.Where(y => !string.IsNullOrWhiteSpace(y))), roomPaths.GetValueOrDefault(x.RoomId)));
             var results = assets.Where(x => $"{x.Name} {x.Category} {x.Brand} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Asset", x.Id, x.Name, x.Category, x.LocationPath))
                 .Concat(fixtures.Where(x => $"{x.Name} {x.Type} {x.Manufacturer} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Fixture", x.Id, x.Name, x.Type, x.LocationPath)))
-                .Concat(locations.Where(x => $"{x.Name} {x.Type} {x.Path}".ToLower().Contains(term)).Select(x => new SearchResultDto("Storage", x.Id, x.Name, x.Type ?? "Storage location", x.Path))).Take(50);
+                .Concat(locations.Where(x => $"{x.Name} {x.Type} {x.Path}".ToLower().Contains(term)).Select(x => new SearchResultDto("Storage", x.Id, x.Name, x.Type ?? "Storage location", x.Path)))
+                .Concat(paintResults).Concat(surfaceResults).Take(50);
             return Results.Ok(results);
         });
 
@@ -675,10 +713,24 @@ public static class InventoryApi
             .Select(x => new RoomPaintDto(x.Id, x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes, x.SortOrder, x.Surface))
             .ToListAsync();
     static async Task<List<StorageLocationDto>> LocationDtos(InventoryDbContext db, Guid? propertyId) { var list = await db.StorageLocations.Where(x => propertyId == null || x.PropertyId == propertyId).ToListAsync(); return list.Select(x => new StorageLocationDto(x.Id, x.PropertyId, x.ParentId, x.Name, x.Type, Path(x, list))).OrderBy(x => x.Path).ToList(); }
+    static async Task<Dictionary<Guid, string>> RoomPaths(InventoryDbContext db) =>
+        await db.Rooms.Include(x => x.Floor).ThenInclude(x => x!.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
+    // Rooms using a paint: explicit library assignments plus painted surfaces whose colour code, or colour name and brand, match.
+    static async Task<List<PaintUsageDto>> PaintUsage(InventoryDbContext db, Paint paint)
+    {
+        var roomPaths = await RoomPaths(db);
+        var assigned = await db.RoomPaints.Where(x => x.PaintId == paint.Id).Select(x => new { x.RoomId, x.Surface }).ToListAsync();
+        var code = Norm(paint.ColorCode);
+        var surfaces = (await db.Surfaces.Where(x => x.SurfaceType != "flooring" && (x.ColorName != null || x.ColorCode != null)).ToListAsync())
+            .Where(x => code != "" && Norm(x.ColorCode) == code || Norm(x.ColorName) == Norm(paint.ColorName) && (x.PaintBrand is null || Norm(x.PaintBrand) == Norm(paint.Brand)));
+        return assigned.Select(x => new PaintUsageDto(x.RoomId, roomPaths.GetValueOrDefault(x.RoomId) ?? "", x.Surface, "Assigned"))
+            .Concat(surfaces.Select(x => new PaintUsageDto(x.RoomId, roomPaths.GetValueOrDefault(x.RoomId) ?? "", x.Name, "Surface")))
+            .OrderBy(x => x.RoomPath).ThenBy(x => x.Surface).ToList();
+    }
     static async Task<List<FixtureDto>> FixtureDtos(InventoryDbContext db, IQueryable<Fixture>? fixtures = null)
     {
         var query = fixtures ?? db.Fixtures.AsQueryable();
-        var rooms = await db.Rooms.Include(x => x.Floor).ThenInclude(x => x!.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
+        var rooms = await RoomPaths(db);
         var list = await query.OrderBy(x => x.Name).ToListAsync();
         return list.Select(x => ToDto(x, rooms.TryGetValue(x.RoomId, out var path) ? path : null)).ToList();
     }

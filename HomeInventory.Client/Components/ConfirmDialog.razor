@@ -8,11 +8,12 @@
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    @Message
+                    <p>@Message</p>
+                    @ChildContent
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-danger" @onclick="OnConfirm">Delete</button>
+                    <button type="button" class="btn btn-danger" disabled="@ConfirmDisabled" @onclick="OnConfirm">Delete</button>
                 </div>
             </div>
         </div>
@@ -28,6 +29,12 @@
 
     [Parameter]
     public string Message { get; set; } = "Are you sure you want to delete this item?";
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public bool ConfirmDisabled { get; set; }
 
     [Parameter]
     public EventCallback OnConfirm { get; set; }

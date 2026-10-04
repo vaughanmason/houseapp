@@ -44,8 +44,25 @@
                             {
                                 <div class="small text-muted">@paint.Notes</div>
                             }
+                            @if (usagePaintId == paint.Id)
+                            {
+                                @if (usage.Count == 0)
+                                {
+                                    <div class="small mt-1">Not used in any room yet.</div>
+                                }
+                                else
+                                {
+                                    <ul class="small mt-1 mb-0">
+                                        @foreach (var item in usage)
+                                        {
+                                            <li>@item.RoomPath@(string.IsNullOrEmpty(item.Surface) ? "" : $" — {item.Surface}") <span class="text-muted">(@(item.Source == "Assigned" ? "assigned" : "surface record"))</span></li>
+                                        }
+                                    </ul>
+                                }
+                            }
                         </div>
-                        <div>
+                        <div class="text-nowrap">
+                            <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => ToggleUsage(paint.Id)">@(usagePaintId == paint.Id ? "Hide rooms" : "Used in")</button>
                             <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(paint)">Edit</button>
                             <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePaint(paint.Id)">Delete</button>
                         </div>
@@ -120,12 +137,21 @@
     List<PaintDto> paints = [];
     List<RoomDto> rooms = [];
     List<RoomPaintDto> roomPaints = [];
+    List<PaintUsageDto> usage = [];
+    Guid? usagePaintId;
 
     string paintBrand = "", paintColorName = "", paintColorCode = "", paintFinish = "", paintNotes = "";
     string roomPaintRoomId = "", roomPaintPaintId = "", roomPaintSurface = "", roomPaintSortOrder = "0";
 
     Guid? editingPaintId;
     string? error;
+
+    async Task ToggleUsage(Guid paintId)
+    {
+        if (usagePaintId == paintId) { usagePaintId = null; return; }
+        usage = await Http.GetFromJsonAsync<List<PaintUsageDto>>($"api/paints/{paintId}/usage") ?? [];
+        usagePaintId = paintId;
+    }
 
     protected override async Task OnInitializedAsync()
     {

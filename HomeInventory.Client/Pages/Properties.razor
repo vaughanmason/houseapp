@@ -60,6 +60,7 @@
                         </div>
                         <div class="small mb-2">@p.Notes</div>
                         <button class="btn btn-outline-primary btn-sm" @onclick="() => StartEdit(p)">Edit</button>
+                        <button class="btn btn-outline-danger btn-sm ms-1" @onclick="() => { deletingProperty = p; deleteConfirmation = string.Empty; }">Delete</button>
                     </li>
                 }
             </ul>
@@ -106,6 +107,15 @@
     </div>
 </div>
 
+<ConfirmDialog Show="deletingProperty is not null"
+               Title="Delete property"
+               Message="@($"This permanently deletes {deletingProperty?.Name} with all its floors, rooms, surfaces, fixtures, storage locations and photos. Type the property name to confirm.")"
+               ConfirmDisabled="@(deletingProperty is null || deleteConfirmation.Trim() != deletingProperty.Name)"
+               OnConfirm="DeleteProperty"
+               OnCancel="() => deletingProperty = null">
+    <input class="form-control" @bind="deleteConfirmation" @bind:event="oninput" placeholder="@deletingProperty?.Name" />
+</ConfirmDialog>
+
 @if (error is not null)
 {
     <div class="alert alert-danger mt-3">@error</div>
@@ -119,7 +129,21 @@
     string photoPropertyId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
 
     Guid? editingPropertyId;
+    PropertyDto? deletingProperty;
+    string deleteConfirmation = "";
     string? error;
+
+    async Task DeleteProperty()
+    {
+        if (deletingProperty is null) return;
+        error = null;
+        var propertyId = deletingProperty.Id;
+        deletingProperty = null;
+        var response = await Http.DeleteAsync($"api/properties/{propertyId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        if (photoPropertyId == propertyId.ToString()) { photoPropertyId = ""; photos = []; }
+        await Load();
+    }
 
     protected override async Task OnInitializedAsync() => await Load();
 
