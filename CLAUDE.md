@@ -41,6 +41,7 @@ Property (Currency, Photos)
 │       └── RoomPaint ──► Paint   (global paint library; composite key RoomId+PaintId)
 ├── StorageLocation     (self-referencing tree via ParentId, scoped to one property)
 ├── Asset ── AssetPhoto (optional RoomId XOR StorageLocationId)
+├── MaintenanceTask ── MaintenanceRecord   (task optionally linked to one of the property's fixtures)
 └── PropertyPhoto
 ```
 
@@ -56,6 +57,7 @@ Every importable entity implements `IHasExternalId` (`Domain.cs`). `OnModelCreat
 - Assets are never hard-deleted. There is no delete endpoint: use `POST /assets/{id}/archive` and `/unarchive`. Dashboard, search, default listings and export only use active assets.
 - Delete behavior (from `OnModelCreating`): Property → Floors/StorageLocations/Assets/PropertyPhotos cascade. Floor → Rooms cascade. Room also has a cascading FK to Property (`Room.PropertyId`). Room → Surfaces/Fixtures/RoomPhotos/RoomPaints cascade. Fixture → photos and Asset → photos cascade. Paint → RoomPaints cascade. **Restrict:** StorageLocation.Parent, Asset.Room, Asset.StorageLocation. Delete endpoints check for dependents and return `BadRequest` first (see the property, floor, room and location delete handlers). Follow that pattern. Because `StorageLocation.Parent` is `Restrict`, deleting a whole location tree must go leaf-first (see `DELETE /properties/{id}`).
 - Handlers trim optional strings (`?.Trim()`), return `Results.ValidationProblem` for missing required fields, `Results.BadRequest("message")` for invalid cross-entity references, `NotFound` for missing route entities, and `Created($"/api/...", dto)` on POST. Status-code re-execution to `/not-found` is applied only to non-`/api` paths (`Program.cs`), so API clients get raw status codes.
+- Maintenance: `IntervalValue` + `IntervalUnit` (`days`/`months`/`years`, both null for one-off tasks). `POST /maintenance/{id}/complete` adds a record and sets `DueOn = NextDue(completedOn)` (null for one-offs), unless the completion is older than `LastCompletedOn` (back-filled history doesn't move the schedule). Tasks follow their fixture's property when a fixture or room moves, and a room holding assets can't move to another property.
 - Currency is a per-property 3-letter ISO code normalized by `NormalizeCurrency` (blank → `"USD"`, invalid → `null` → validation error). Never sum money across currencies: the dashboard returns one `CurrencyTotalDto` per currency.
 
 ## Migrations

@@ -22,8 +22,9 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Nested storage location hierarchy with server-computed paths (`Parent → Child`) per property
 - Assets with categories, brand/model/serial numbers, valuation, condition, archive toggle, and optional room/storage-location placement
 - Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
+- Maintenance tasks for a property or one of its fixtures/utilities: one-off or repeating every N days/months/years, with service history (date, cost, supplier, notes) and automatic next-due dates
 - Photo metadata registry for external storage references on properties, rooms, fixtures, and assets
-- Dashboard summary metrics and category totals, grouped by property currency
+- Dashboard summary metrics, category totals grouped by property currency, and overdue / due-in-30-days maintenance counts
 - Text search across assets, fixtures, storage locations, paints (with the rooms that use them) and surfaces
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 - **Enhanced UI with multi-page organization** for improved user experience
@@ -38,6 +39,7 @@ The application uses a multi-page, component-based architecture to organize func
 | **Floors** | Organize property floors | Create and manage floors by property with notes and sorting |
 | **Rooms** | Rooms, surfaces and room photos | Complete room metadata (dimensions, finishes, paint details, utilities); add/edit surfaces with type-specific fields (paint for wall/ceiling/trim, product and supplier for flooring); room photos |
 | **Fixtures** | Permanent room fixtures | Fixture lifecycle (purchase, installation, maintenance), financial tracking, photos, warranty info |
+| **Maintenance** | Recurring and one-off jobs | Tasks grouped into Overdue / Due in 30 days / Upcoming / No due date; Mark done (advances the schedule), service history, edit, delete |
 | **Paints** | Paint library and assignments | Global paint registry, assign colours to rooms, "Used in" view listing every room using a paint |
 | **Assets & Storage** | Assets and storage organization | Asset catalog with valuation, Move picker, archive/unarchive with an archived view; nested storage locations with edit/re-parent; photo management |
 
@@ -62,6 +64,7 @@ The application uses a multi-page, component-based architecture to organize func
 | StorageLocations | GET by property, POST/PUT tree edits, DELETE (empty leaf only) | Self-referencing hierarchy scoped per property; cycles rejected |
 | Assets | GET list/filter (`archived=true/false`), POST, PUT, move, archive/unarchive (no hard delete), photo CRUD | Cross-entity validation is enforced for property/floor/room references |
 | Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` | Room-scoped permanent items with type-specific metadata |
+| Maintenance | GET (`propertyId`, `fixtureId` filters), POST, PUT/{id}, DELETE/{id}, POST `/{id}/complete`, GET `/{id}/history` | Task belongs to a property and optionally one of its fixtures; completing sets the next due date from the completion date |
 | FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
 | AssetPhotos | GET/POST/DELETE under `/assets/{id}/photos` | External photo references for assets |
 
@@ -81,7 +84,9 @@ InventoryExport {
   Paints[],         // optional; matched to existing paints by brand/colour/code
   RoomPaints[],     // optional
   RoomPhotos[],     // optional
-  FixturePhotos[]   // optional
+  FixturePhotos[],  // optional
+  MaintenanceTasks[],   // optional
+  MaintenanceRecords[]  // optional
 }
 
 ImportPreviewDto {

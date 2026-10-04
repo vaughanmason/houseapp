@@ -450,6 +450,130 @@ public sealed class InventoryValidationTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/properties/{property.Id}")).StatusCode);
     }
 
+    [Fact]
+    public async Task Maintenance_CompleteAdvancesScheduleAndRecordsHistory()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var recurring = await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Clean gutters", 6, "Months", new DateOnly(2026, 1, 1), "Gutter Co", 500m, null));
+        Assert.Equal("months", recurring.IntervalUnit);
+
+        var completed = await (await client.PostAsJsonAsync($"/api/maintenance/{recurring.Id}/complete", new MaintenanceCompletionInput(new DateOnly(2026, 1, 10), 450m, "Gutter Co", "All clear"))).Content.ReadFromJsonAsync<MaintenanceTaskDto>();
+        Assert.Equal(new DateOnly(2026, 7, 10), completed!.DueOn);
+        Assert.Equal(new DateOnly(2026, 1, 10), completed.LastCompletedOn);
+
+        // Back-filling an older service adds history without moving the schedule backwards.
+        var backfilled = await (await client.PostAsJsonAsync($"/api/maintenance/{recurring.Id}/complete", new MaintenanceCompletionInput(new DateOnly(2025, 7, 2), null, null, null))).Content.ReadFromJsonAsync<MaintenanceTaskDto>();
+        Assert.Equal(new DateOnly(2026, 7, 10), backfilled!.DueOn);
+        var history = (await client.GetFromJsonAsync<List<MaintenanceRecordDto>>($"/api/maintenance/{recurring.Id}/history"))!;
+        Assert.Equal([new DateOnly(2026, 1, 10), new DateOnly(2025, 7, 2)], history.Select(x => x.CompletedOn));
+        Assert.Equal(450m, history[0].Cost);
+
+        var oneOff = await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Replace geyser element", null, null, new DateOnly(2026, 2, 1), null, null, null));
+        var doneOnce = await (await client.PostAsJsonAsync($"/api/maintenance/{oneOff.Id}/complete", new MaintenanceCompletionInput(new DateOnly(2026, 2, 3), null, null, null))).Content.ReadFromJsonAsync<MaintenanceTaskDto>();
+        Assert.Null(doneOnce!.DueOn);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/maintenance/{recurring.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/maintenance/{recurring.Id}/history")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Maintenance_ValidatesInput()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var home = await CreatePropertyAsync(client, "Home");
+        var cottage = await CreatePropertyAsync(client, "Cottage");
+        var room = await CreateRoomAsync(client, (await CreateFloorAsync(client, cottage.Id)).Id);
+        var fixture = await (await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id))).Content.ReadFromJsonAsync<FixtureDto>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/maintenance", new MaintenanceTaskInput(home.Id, null, " ", null, null, null, null, null, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/maintenance", new MaintenanceTaskInput(home.Id, null, "Paint", 2, "fortnights", null, null, null, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/maintenance", new MaintenanceTaskInput(home.Id, null, "Paint", 0, "months", null, null, null, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/maintenance", new MaintenanceTaskInput(home.Id, fixture!.Id, "Service", null, null, null, null, null, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/maintenance", new MaintenanceTaskInput(cottage.Id, fixture.Id, "Service", null, null, null, null, null, null))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Dashboard_CountsOverdueAndDueSoonMaintenance()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Overdue", null, null, today.AddDays(-1), null, null, null));
+        await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Today", null, null, today, null, null, null));
+        await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Soon", null, null, today.AddDays(30), null, null, null));
+        await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Later", null, null, today.AddDays(31), null, null, null));
+        await CreateTaskAsync(client, new MaintenanceTaskInput(property.Id, null, "Unscheduled", null, null, null, null, null, null));
+
+        var dashboard = await client.GetFromJsonAsync<DashboardDto>("/api/dashboard");
+
+        Assert.Equal(1, dashboard!.MaintenanceOverdue);
+        Assert.Equal(2, dashboard.MaintenanceDueSoon);
+    }
+
+    [Fact]
+    public async Task MovingFixtureOrRoom_KeepsMaintenanceAndAssetsInTheRightProperty()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var home = await CreatePropertyAsync(client, "Home");
+        var cottage = await CreatePropertyAsync(client, "Cottage");
+        var homeRoom = await CreateRoomAsync(client, (await CreateFloorAsync(client, home.Id)).Id);
+        var cottageFloor = await CreateFloorAsync(client, cottage.Id);
+        var cottageRoom = await CreateRoomAsync(client, cottageFloor.Id);
+        var fixture = await (await client.PostAsJsonAsync($"/api/rooms/{homeRoom.Id}/fixtures", FixtureFor(homeRoom.Id))).Content.ReadFromJsonAsync<FixtureDto>();
+        var task = await CreateTaskAsync(client, new MaintenanceTaskInput(home.Id, fixture!.Id, "Service", null, null, null, null, null, null));
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/fixtures/{fixture.Id}", FixtureFor(cottageRoom.Id))).StatusCode);
+        Assert.Equal(cottage.Id, Assert.Single((await client.GetFromJsonAsync<List<MaintenanceTaskDto>>("/api/maintenance"))!).PropertyId);
+
+        await CreateAssetAsync(client, home.Id, homeRoom.Id, null, "Couch");
+        var moveRoom = await client.PutAsJsonAsync($"/api/rooms/{homeRoom.Id}", new RoomInput(cottageFloor.Id, "Lounge", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+        Assert.Equal(HttpStatusCode.BadRequest, moveRoom.StatusCode);
+        Assert.Equal(task.Id, Assert.Single((await client.GetFromJsonAsync<List<MaintenanceTaskDto>>($"/api/maintenance?propertyId={cottage.Id}"))!).Id);
+    }
+
+    [Fact]
+    public async Task Maintenance_RoundTripsThroughBackupIdempotently()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var room = await CreateRoomAsync(source, (await CreateFloorAsync(source, property.Id)).Id);
+            var fixture = await (await source.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id))).Content.ReadFromJsonAsync<FixtureDto>();
+            var task = await CreateTaskAsync(source, new MaintenanceTaskInput(property.Id, fixture!.Id, "Service aircon", 1, "years", null, null, null, null));
+            await source.PostAsJsonAsync($"/api/maintenance/{task.Id}/complete", new MaintenanceCompletionInput(new DateOnly(2026, 3, 1), 900m, "CoolAir", null));
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+        Assert.Single(backup.MaintenanceTasks!);
+        Assert.Single(backup.MaintenanceRecords!);
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        var preview = (await (await target.PostAsJsonAsync("/api/import/preview", backup)).Content.ReadFromJsonAsync<ImportPreviewDto>())!;
+        Assert.True(preview.IsValid, string.Join("; ", preview.Errors));
+        Assert.Equal(1, preview.MaintenanceTasks);
+        for (var attempt = 0; attempt < 2; attempt++)
+            Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
+
+        var task2 = Assert.Single((await target.GetFromJsonAsync<List<MaintenanceTaskDto>>("/api/maintenance"))!);
+        Assert.Equal(new DateOnly(2027, 3, 1), task2.DueOn);
+        Assert.Equal("Sink", task2.FixtureName);
+        Assert.Equal(900m, Assert.Single((await target.GetFromJsonAsync<List<MaintenanceRecordDto>>($"/api/maintenance/{task2.Id}/history"))!).Cost);
+    }
+
+    private static async Task<MaintenanceTaskDto> CreateTaskAsync(HttpClient client, MaintenanceTaskInput input)
+    {
+        var response = await client.PostAsJsonAsync("/api/maintenance", input);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<MaintenanceTaskDto>())!;
+    }
+
     private static SurfaceInput SurfaceFor(Guid roomId, string name, string type) =>
         new(roomId, name, type, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 0);
 

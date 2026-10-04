@@ -1,0 +1,289 @@
+@page "/maintenance"
+@inject HttpClient Http
+
+<PageTitle>Maintenance</PageTitle>
+
+<div class="mb-4">
+    <h1>Maintenance</h1>
+    <p class="lead">Recurring and one-off jobs for your properties, fixtures and utilities.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">@(editingTaskId is null ? "Add task" : "Edit task")</h2>
+            <select class="form-select mb-2" @bind="formPropertyId" @bind:after="LoadFormFixtures">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(formPropertyId))
+            {
+                <select class="form-select mb-2" @bind="formFixtureId">
+                    <option value="">Whole property (no fixture)</option>
+                    @foreach (var f in formFixtures) { <option value="@f.Id">@f.Name · @f.LocationPath</option> }
+                </select>
+            }
+            <input class="form-control mb-2" @bind="formTitle" placeholder="Task (e.g. Service air conditioner)" />
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="repeats" @bind="formRepeats" />
+                <label class="form-check-label" for="repeats">Repeats</label>
+            </div>
+            @if (formRepeats)
+            {
+                <div class="input-group mb-2">
+                    <span class="input-group-text">Every</span>
+                    <input class="form-control" type="number" min="1" @bind="formIntervalValue" />
+                    <select class="form-select" @bind="formIntervalUnit">
+                        <option value="days">days</option>
+                        <option value="months">months</option>
+                        <option value="years">years</option>
+                    </select>
+                </div>
+            }
+            <label class="form-label small text-muted mb-1" for="due">Next due</label>
+            <input class="form-control mb-2" id="due" type="date" @bind="formDueOn" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-7"><input class="form-control" @bind="formSupplier" placeholder="Supplier" /></div>
+                <div class="col-md-5"><input class="form-control" type="number" step="0.01" @bind="formEstimatedCost" placeholder="Estimated cost" /></div>
+            </div>
+            <textarea class="form-control mb-2" @bind="formNotes" placeholder="Notes"></textarea>
+            <div>
+                <button class="btn btn-primary" @onclick="SaveTask">@(editingTaskId is null ? "Add task" : "Update task")</button>
+                @if (editingTaskId is not null) { <button class="btn btn-outline-secondary ms-2" @onclick="ClearForm">Cancel</button> }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h4 mb-0">Tasks</h2>
+            <select class="form-select w-auto" @bind="filterPropertyId">
+                <option value="">All properties</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+        </div>
+        @if (properties.Count == 0)
+        {
+            <div class="alert alert-info">No properties found. <a href="properties">Create a property first</a>.</div>
+        }
+        else if (FilteredTasks().Count == 0)
+        {
+            <div class="alert alert-info">No maintenance tasks yet. Add one to the left.</div>
+        }
+        else
+        {
+            @foreach (var (heading, css, group) in Groups())
+            {
+                if (group.Count == 0) continue;
+                <h3 class="h6 mt-3 text-@css">@heading (@group.Count)</h3>
+                <ul class="list-group">
+                    @foreach (var task in group)
+                    {
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong>@task.Title</strong>
+                                    <div class="small text-muted">@(task.FixtureName ?? "Whole property") · @task.PropertyName</div>
+                                    <div class="small text-muted">
+                                        @(task.IntervalValue is null ? "One-off" : $"Every {task.IntervalValue} {task.IntervalUnit}")
+                                        · Due @(task.DueOn?.ToString("yyyy-MM-dd") ?? "—")
+                                        @if (task.LastCompletedOn is not null) { <span> · Last done @task.LastCompletedOn?.ToString("yyyy-MM-dd")</span> }
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(task.Supplier) || task.EstimatedCost is not null)
+                                    {
+                                        <div class="small text-muted">
+                                            @task.Supplier
+                                            @if (task.EstimatedCost is not null) { <span> · est. <CurrencyDisplay Value="task.EstimatedCost" CurrencyCode="@task.Currency" /></span> }
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(task.Notes)) { <div class="small text-muted">@task.Notes</div> }
+                                </div>
+                                <div class="text-nowrap">
+                                    <button class="btn btn-sm btn-success me-1" @onclick="() => StartComplete(task)">Mark done</button>
+                                    <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => ToggleHistory(task.Id)">History</button>
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(task)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => deletingTask = task">Delete</button>
+                                </div>
+                            </div>
+                            @if (completingTaskId == task.Id)
+                            {
+                                <div class="row g-2 mt-2">
+                                    <div class="col-md-3"><input class="form-control form-control-sm" type="date" @bind="completeOn" title="Completed on" /></div>
+                                    <div class="col-md-2"><input class="form-control form-control-sm" type="number" step="0.01" @bind="completeCost" placeholder="Cost" /></div>
+                                    <div class="col-md-3"><input class="form-control form-control-sm" @bind="completeSupplier" placeholder="Supplier" /></div>
+                                    <div class="col-md-4"><input class="form-control form-control-sm" @bind="completeNotes" placeholder="Notes" /></div>
+                                    <div class="col-12">
+                                        <button class="btn btn-sm btn-success" @onclick="() => CompleteTask(task.Id)">Save</button>
+                                        <button class="btn btn-sm btn-outline-secondary ms-1" @onclick="() => completingTaskId = null">Cancel</button>
+                                    </div>
+                                </div>
+                            }
+                            @if (historyTaskId == task.Id)
+                            {
+                                @if (history.Count == 0)
+                                {
+                                    <div class="small mt-2">No service history yet.</div>
+                                }
+                                else
+                                {
+                                    <ul class="small mt-2 mb-0">
+                                        @foreach (var record in history)
+                                        {
+                                            <li>
+                                                @record.CompletedOn.ToString("yyyy-MM-dd")
+                                                @if (record.Cost is not null) { <span> · <CurrencyDisplay Value="record.Cost" CurrencyCode="@task.Currency" /></span> }
+                                                @if (!string.IsNullOrEmpty(record.Supplier)) { <span> · @record.Supplier</span> }
+                                                @if (!string.IsNullOrEmpty(record.Notes)) { <span class="text-muted"> · @record.Notes</span> }
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+</div>
+
+<ConfirmDialog Show="deletingTask is not null"
+               Title="Delete maintenance task"
+               Message="@($"Delete \"{deletingTask?.Title}\" and its service history?")"
+               OnConfirm="DeleteTask"
+               OnCancel="() => deletingTask = null" />
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    List<PropertyDto> properties = [];
+    List<MaintenanceTaskDto> tasks = [];
+    List<FixtureDto> formFixtures = [];
+    List<MaintenanceRecordDto> history = [];
+
+    string formPropertyId = "", formFixtureId = "", formTitle = "", formIntervalValue = "12", formIntervalUnit = "months", formSupplier = "", formEstimatedCost = "", formNotes = "";
+    bool formRepeats = true;
+    DateOnly? formDueOn;
+    string filterPropertyId = "";
+    Guid? editingTaskId, completingTaskId, historyTaskId;
+    MaintenanceTaskDto? deletingTask;
+    DateOnly? completeOn;
+    string completeCost = "", completeSupplier = "", completeNotes = "";
+    string? error;
+
+    static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        await ReloadTasks();
+    }
+
+    async Task ReloadTasks() => tasks = await Http.GetFromJsonAsync<List<MaintenanceTaskDto>>("api/maintenance") ?? [];
+
+    List<MaintenanceTaskDto> FilteredTasks() => tasks.Where(t => filterPropertyId == "" || t.PropertyId.ToString() == filterPropertyId).ToList();
+
+    IEnumerable<(string Heading, string Css, List<MaintenanceTaskDto> Tasks)> Groups()
+    {
+        var list = FilteredTasks();
+        yield return ("Overdue", "danger", list.Where(t => t.DueOn < Today).ToList());
+        yield return ("Due in the next 30 days", "warning", list.Where(t => t.DueOn >= Today && t.DueOn <= Today.AddDays(30)).ToList());
+        yield return ("Upcoming", "body", list.Where(t => t.DueOn > Today.AddDays(30)).ToList());
+        yield return ("No due date", "muted", list.Where(t => t.DueOn is null).ToList());
+    }
+
+    async Task LoadFormFixtures()
+    {
+        formFixtureId = "";
+        await LoadFixtures();
+    }
+
+    async Task LoadFixtures() =>
+        formFixtures = Guid.TryParse(formPropertyId, out var propertyId) ? await Http.GetFromJsonAsync<List<FixtureDto>>($"api/fixtures?propertyId={propertyId}") ?? [] : [];
+
+    async Task StartEdit(MaintenanceTaskDto task)
+    {
+        editingTaskId = task.Id;
+        formPropertyId = task.PropertyId.ToString();
+        await LoadFixtures();
+        formFixtureId = task.FixtureId?.ToString() ?? "";
+        formTitle = task.Title;
+        formRepeats = task.IntervalValue is not null;
+        formIntervalValue = task.IntervalValue?.ToString() ?? "12";
+        formIntervalUnit = task.IntervalUnit ?? "months";
+        formDueOn = task.DueOn;
+        formSupplier = task.Supplier ?? "";
+        formEstimatedCost = task.EstimatedCost?.ToString() ?? "";
+        formNotes = task.Notes ?? "";
+    }
+
+    void ClearForm()
+    {
+        editingTaskId = null;
+        formFixtureId = formTitle = formSupplier = formEstimatedCost = formNotes = "";
+        formRepeats = true;
+        formIntervalValue = "12";
+        formIntervalUnit = "months";
+        formDueOn = null;
+    }
+
+    async Task SaveTask()
+    {
+        error = null;
+        if (!Guid.TryParse(formPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        if (string.IsNullOrWhiteSpace(formTitle)) { error = "Task title is required."; return; }
+        var fixtureId = Guid.TryParse(formFixtureId, out var fid) ? (Guid?)fid : null;
+        var input = new MaintenanceTaskInput(propertyId, fixtureId, formTitle, formRepeats ? TryInt(formIntervalValue) : null, formRepeats ? formIntervalUnit : null, formDueOn, formSupplier, TryDecimal(formEstimatedCost), formNotes);
+        var response = editingTaskId is null
+            ? await Http.PostAsJsonAsync("api/maintenance", input)
+            : await Http.PutAsJsonAsync($"api/maintenance/{editingTaskId}", input);
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        ClearForm();
+        await ReloadTasks();
+    }
+
+    void StartComplete(MaintenanceTaskDto task)
+    {
+        completingTaskId = task.Id;
+        completeOn = Today;
+        completeCost = task.EstimatedCost?.ToString() ?? "";
+        completeSupplier = task.Supplier ?? "";
+        completeNotes = "";
+    }
+
+    async Task CompleteTask(Guid taskId)
+    {
+        error = null;
+        if (completeOn is null) { error = "Choose the date the work was done."; return; }
+        var response = await Http.PostAsJsonAsync($"api/maintenance/{taskId}/complete", new MaintenanceCompletionInput(completeOn.Value, TryDecimal(completeCost), completeSupplier, completeNotes));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        completingTaskId = null;
+        await ReloadTasks();
+        if (historyTaskId == taskId) history = await Http.GetFromJsonAsync<List<MaintenanceRecordDto>>($"api/maintenance/{taskId}/history") ?? [];
+    }
+
+    async Task ToggleHistory(Guid taskId)
+    {
+        if (historyTaskId == taskId) { historyTaskId = null; return; }
+        history = await Http.GetFromJsonAsync<List<MaintenanceRecordDto>>($"api/maintenance/{taskId}/history") ?? [];
+        historyTaskId = taskId;
+    }
+
+    async Task DeleteTask()
+    {
+        if (deletingTask is null) return;
+        error = null;
+        var taskId = deletingTask.Id;
+        deletingTask = null;
+        var response = await Http.DeleteAsync($"api/maintenance/{taskId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        if (editingTaskId == taskId) ClearForm();
+        await ReloadTasks();
+    }
+
+    static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
+    static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
+}

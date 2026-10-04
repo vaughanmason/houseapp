@@ -222,6 +222,38 @@ public sealed class AssetPhoto : IHasExternalId
     public Asset? Asset { get; set; }
 }
 
+public sealed class MaintenanceTask : IHasExternalId
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
+    public Guid PropertyId { get; set; }
+    public Guid? FixtureId { get; set; }
+    public required string Title { get; set; }
+    /// <summary>Repeat every <see cref="IntervalValue"/> <see cref="IntervalUnit"/> (days, months or years); both null for a one-off task.</summary>
+    public int? IntervalValue { get; set; }
+    public string? IntervalUnit { get; set; }
+    public DateOnly? DueOn { get; set; }
+    public DateOnly? LastCompletedOn { get; set; }
+    public string? Supplier { get; set; }
+    public decimal? EstimatedCost { get; set; }
+    public string? Notes { get; set; }
+    public Property? Property { get; set; }
+    public Fixture? Fixture { get; set; }
+    public List<MaintenanceRecord> Records { get; set; } = [];
+}
+
+public sealed class MaintenanceRecord : IHasExternalId
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
+    public Guid TaskId { get; set; }
+    public DateOnly CompletedOn { get; set; }
+    public decimal? Cost { get; set; }
+    public string? Supplier { get; set; }
+    public string? Notes { get; set; }
+    public MaintenanceTask? Task { get; set; }
+}
+
 public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : DbContext(options)
 {
     public DbSet<Property> Properties => Set<Property>();
@@ -237,6 +269,8 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<StorageLocation> StorageLocations => Set<StorageLocation>();
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<AssetPhoto> AssetPhotos => Set<AssetPhoto>();
+    public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
+    public DbSet<MaintenanceRecord> MaintenanceRecords => Set<MaintenanceRecord>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -303,6 +337,16 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<Asset>().HasOne(x => x.Property).WithMany(x => x.Assets).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Asset>().HasOne(x => x.Room).WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Asset>().HasOne(x => x.StorageLocation).WithMany().HasForeignKey(x => x.StorageLocationId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<MaintenanceTask>().Property(x => x.Title).HasMaxLength(200).IsRequired();
+        model.Entity<MaintenanceTask>().Property(x => x.IntervalUnit).HasMaxLength(10);
+        model.Entity<MaintenanceTask>().Property(x => x.Supplier).HasMaxLength(160);
+        model.Entity<MaintenanceTask>().Property(x => x.Notes).HasMaxLength(1000);
+        model.Entity<MaintenanceTask>().HasOne(x => x.Property).WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<MaintenanceTask>().HasOne(x => x.Fixture).WithMany().HasForeignKey(x => x.FixtureId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<MaintenanceTask>().HasIndex(x => x.DueOn);
+        model.Entity<MaintenanceRecord>().Property(x => x.Supplier).HasMaxLength(160);
+        model.Entity<MaintenanceRecord>().Property(x => x.Notes).HasMaxLength(1000);
+        model.Entity<MaintenanceRecord>().HasOne(x => x.Task).WithMany(x => x.Records).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
         foreach (var type in model.Model.GetEntityTypes().Select(x => x.ClrType).Where(typeof(IHasExternalId).IsAssignableFrom).ToList())
         {
             model.Entity(type).Property<string?>(nameof(IHasExternalId.ExternalId)).HasMaxLength(200);

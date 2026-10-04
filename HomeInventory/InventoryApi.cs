@@ -141,8 +141,15 @@ public static class InventoryApi
             var entity = await db.Rooms.FindAsync(id);
             if (entity is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(input.Name) || !await db.Floors.AnyAsync(x => x.Id == input.FloorId)) return Results.BadRequest("A valid floor and room name are required.");
+            var newPropertyId = (await db.Floors.FindAsync(input.FloorId))!.PropertyId;
+            if (newPropertyId != entity.PropertyId)
+            {
+                // Assets are owned by a property, so a room holding them can't move to another property.
+                if (await db.Assets.AnyAsync(x => x.RoomId == id)) return Results.BadRequest("Move this room's assets out before moving it to a floor in another property.");
+                await db.MaintenanceTasks.Where(x => x.Fixture != null && x.Fixture.RoomId == id).ExecuteUpdateAsync(x => x.SetProperty(t => t.PropertyId, newPropertyId));
+            }
             entity.FloorId = input.FloorId;
-            entity.PropertyId = (await db.Floors.FindAsync(input.FloorId))!.PropertyId;
+            entity.PropertyId = newPropertyId;
             entity.Name = input.Name.Trim();
             entity.Type = input.Type?.Trim();
             entity.Area = input.Area;
@@ -298,7 +305,10 @@ public static class InventoryApi
             if (entity is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Type))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Name is required."], ["type"] = ["Type is required."] });
-            if (!await db.Rooms.AnyAsync(x => x.Id == input.RoomId)) return Results.BadRequest("The selected room does not exist.");
+            var roomPropertyId = await db.Rooms.Where(x => x.Id == input.RoomId).Select(x => (Guid?)x.PropertyId).SingleOrDefaultAsync();
+            if (roomPropertyId is null) return Results.BadRequest("The selected room does not exist.");
+            // Maintenance tasks follow their fixture if it moves to a room in another property.
+            await db.MaintenanceTasks.Where(x => x.FixtureId == id && x.PropertyId != roomPropertyId).ExecuteUpdateAsync(x => x.SetProperty(t => t.PropertyId, roomPropertyId.Value));
             entity.RoomId = input.RoomId;
             entity.Name = input.Name.Trim();
             entity.Type = input.Type.Trim();
@@ -549,9 +559,64 @@ public static class InventoryApi
             return Results.NoContent();
         });
 
+        api.MapGet("/maintenance", async (Guid? propertyId, Guid? fixtureId, InventoryDbContext db) =>
+        {
+            var tasks = db.MaintenanceTasks.AsQueryable();
+            if (propertyId is not null) tasks = tasks.Where(x => x.PropertyId == propertyId.Value);
+            if (fixtureId is not null) tasks = tasks.Where(x => x.FixtureId == fixtureId.Value);
+            return Results.Ok(await MaintenanceDtos(db, tasks));
+        });
+        api.MapPost("/maintenance", async (MaintenanceTaskInput input, InventoryDbContext db) =>
+        {
+            var error = await ValidateMaintenance(input, db);
+            if (error is not null) return error;
+            var entity = new MaintenanceTask { Title = "" };
+            ApplyMaintenance(input, entity);
+            db.MaintenanceTasks.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/maintenance/{entity.Id}", (await MaintenanceDtos(db, db.MaintenanceTasks.Where(x => x.Id == entity.Id))).Single());
+        });
+        api.MapPut("/maintenance/{id:guid}", async (Guid id, MaintenanceTaskInput input, InventoryDbContext db) =>
+        {
+            var entity = await db.MaintenanceTasks.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            var error = await ValidateMaintenance(input, db);
+            if (error is not null) return error;
+            ApplyMaintenance(input, entity);
+            await db.SaveChangesAsync();
+            return Results.Ok((await MaintenanceDtos(db, db.MaintenanceTasks.Where(x => x.Id == id))).Single());
+        });
+        api.MapDelete("/maintenance/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.MaintenanceTasks.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            db.MaintenanceTasks.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+        api.MapPost("/maintenance/{id:guid}/complete", async (Guid id, MaintenanceCompletionInput input, InventoryDbContext db) =>
+        {
+            var entity = await db.MaintenanceTasks.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            db.MaintenanceRecords.Add(new MaintenanceRecord { TaskId = id, CompletedOn = input.CompletedOn, Cost = input.Cost, Supplier = input.Supplier?.Trim(), Notes = input.Notes?.Trim() });
+            // Recording an older service (back-filling history) must not move the schedule backwards.
+            if (entity.LastCompletedOn is null || input.CompletedOn >= entity.LastCompletedOn)
+            {
+                entity.LastCompletedOn = input.CompletedOn;
+                entity.DueOn = NextDue(input.CompletedOn, entity.IntervalValue, entity.IntervalUnit);
+            }
+            await db.SaveChangesAsync();
+            return Results.Ok((await MaintenanceDtos(db, db.MaintenanceTasks.Where(x => x.Id == id))).Single());
+        });
+        api.MapGet("/maintenance/{id:guid}/history", async (Guid id, InventoryDbContext db) =>
+        {
+            if (!await db.MaintenanceTasks.AnyAsync(x => x.Id == id)) return Results.NotFound();
+            return Results.Ok(await db.MaintenanceRecords.Where(x => x.TaskId == id).OrderByDescending(x => x.CompletedOn)
+                .Select(x => new MaintenanceRecordDto(x.Id, x.TaskId, x.CompletedOn, x.Cost, x.Supplier, x.Notes)).ToListAsync());
+        });
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {
-            // TODO: Include due maintenance, expiring warranties, missing receipts, recent purchases, and room completion metrics.
+            // TODO: Include expiring warranties, missing receipts, recent purchases, and room completion metrics.
             // Values are only summed within one currency; properties with different currencies get separate totals.
             var assets = await db.Assets.Where(x => !x.IsArchived).Select(x => new { x.Category, Value = x.CurrentValue ?? 0, Currency = x.Property!.Currency }).ToListAsync();
             var fixtures = await db.Fixtures.Select(x => new { Category = x.Type, Value = x.CurrentValue ?? 0, Currency = x.Room!.Floor!.Property!.Currency }).ToListAsync();
@@ -565,7 +630,9 @@ public static class InventoryApi
                     x.Where(y => y.IsFixture).Sum(y => y.Value),
                     x.GroupBy(y => y.Category).Select(y => new CategoryTotalDto(y.Key, y.Sum(z => z.Value))).OrderByDescending(y => y.Total).ToList()))
                 .ToList();
-            return new DashboardDto(assets.Count, fixtures.Count, totals);
+            var today = Today();
+            var dueDates = await db.MaintenanceTasks.Where(x => x.DueOn != null).Select(x => x.DueOn!.Value).ToListAsync();
+            return new DashboardDto(assets.Count, fixtures.Count, totals, dueDates.Count(x => x < today), dueDates.Count(x => x >= today && x <= today.AddDays(30)));
         });
         api.MapGet("/search", async (string? q, InventoryDbContext db) =>
         {
@@ -613,6 +680,8 @@ public static class InventoryApi
             var fixturePhotos = await ExistingIds(db.FixturePhotos);
             var assetPhotos = await ExistingIds(db.AssetPhotos);
             var surfaces = await ExistingIds(db.Surfaces);
+            var tasks = await ExistingIds(db.MaintenanceTasks);
+            var records = await ExistingIds(db.MaintenanceRecords);
 
             foreach (var property in inventory.Properties.Where(x => !properties.ContainsKey(x.ExternalId)))
             {
@@ -718,6 +787,16 @@ public static class InventoryApi
             foreach (var photo in (inventory.AssetPhotos ?? []).Where(x => !assetPhotos.ContainsKey(x.ExternalId) && assets.ContainsKey(x.AssetExternalId)))
                 db.AssetPhotos.Add(new AssetPhoto { ExternalId = photo.ExternalId, AssetId = assets[photo.AssetExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
 
+            foreach (var task in (inventory.MaintenanceTasks ?? []).Where(x => !tasks.ContainsKey(x.ExternalId)))
+            {
+                var recurring = task.IntervalValue is > 0;
+                var entity = new MaintenanceTask { ExternalId = task.ExternalId, PropertyId = properties[task.PropertyExternalId], FixtureId = task.FixtureExternalId is null ? null : fixtures[task.FixtureExternalId], Title = task.Title.Trim(), IntervalValue = recurring ? task.IntervalValue : null, IntervalUnit = recurring ? task.IntervalUnit?.ToLowerInvariant() : null, DueOn = task.DueOn, LastCompletedOn = task.LastCompletedOn, Supplier = task.Supplier?.Trim(), EstimatedCost = task.EstimatedCost, Notes = task.Notes?.Trim() };
+                db.MaintenanceTasks.Add(entity);
+                tasks[task.ExternalId] = entity.Id;
+            }
+            foreach (var record in (inventory.MaintenanceRecords ?? []).Where(x => !records.ContainsKey(x.ExternalId)))
+                db.MaintenanceRecords.Add(new MaintenanceRecord { ExternalId = record.ExternalId, TaskId = tasks[record.TaskExternalId], CompletedOn = record.CompletedOn, Cost = record.Cost, Supplier = record.Supplier?.Trim(), Notes = record.Notes?.Trim() });
+
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
             return Results.NoContent();
@@ -746,6 +825,53 @@ public static class InventoryApi
             .Select(x => new RoomPaintDto(x.Id, x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes, x.SortOrder, x.Surface))
             .ToListAsync();
     static async Task<List<StorageLocationDto>> LocationDtos(InventoryDbContext db, Guid? propertyId) { var list = await db.StorageLocations.Where(x => propertyId == null || x.PropertyId == propertyId).ToListAsync(); return list.Select(x => new StorageLocationDto(x.Id, x.PropertyId, x.ParentId, x.Name, x.Type, Path(x, list))).OrderBy(x => x.Path).ToList(); }
+    static readonly string[] IntervalUnits = ["days", "months", "years"];
+    static DateOnly Today() => DateOnly.FromDateTime(DateTime.Today);
+    /// <summary>Next due date after a completion; null for one-off tasks, which are finished once done.</summary>
+    static DateOnly? NextDue(DateOnly from, int? value, string? unit) => (value, unit) switch
+    {
+        (int v, "days") => from.AddDays(v),
+        (int v, "months") => from.AddMonths(v),
+        (int v, "years") => from.AddYears(v),
+        _ => null
+    };
+    static async Task<IResult?> ValidateMaintenance(MaintenanceTaskInput input, InventoryDbContext db)
+    {
+        var errors = new Dictionary<string, string[]>();
+        if (string.IsNullOrWhiteSpace(input.Title)) errors["title"] = ["Title is required."];
+        var unit = input.IntervalUnit?.Trim().ToLowerInvariant();
+        if (input.IntervalValue is not null || !string.IsNullOrWhiteSpace(unit))
+        {
+            if (input.IntervalValue is not > 0) errors["intervalValue"] = ["Repeat interval must be a positive number."];
+            if (!IntervalUnits.Contains(unit)) errors["intervalUnit"] = ["Repeat unit must be days, months or years."];
+        }
+        if (errors.Count > 0) return Results.ValidationProblem(errors);
+        if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return Results.BadRequest("The selected property does not exist.");
+        if (input.FixtureId is not null && !await db.Fixtures.AnyAsync(x => x.Id == input.FixtureId && x.Room != null && x.Room.PropertyId == input.PropertyId))
+            return Results.BadRequest("The fixture must be in the selected property.");
+        return null;
+    }
+    static void ApplyMaintenance(MaintenanceTaskInput x, MaintenanceTask t)
+    {
+        var recurring = x.IntervalValue is > 0;
+        t.PropertyId = x.PropertyId;
+        t.FixtureId = x.FixtureId;
+        t.Title = x.Title.Trim();
+        t.IntervalValue = recurring ? x.IntervalValue : null;
+        t.IntervalUnit = recurring ? x.IntervalUnit?.Trim().ToLowerInvariant() : null;
+        t.DueOn = x.DueOn;
+        t.Supplier = x.Supplier?.Trim();
+        t.EstimatedCost = x.EstimatedCost;
+        t.Notes = x.Notes?.Trim();
+    }
+    static async Task<List<MaintenanceTaskDto>> MaintenanceDtos(InventoryDbContext db, IQueryable<MaintenanceTask> tasks)
+    {
+        var list = await tasks.Include(x => x.Property).Include(x => x.Fixture).ToListAsync();
+        // Overdue and soonest-due first; tasks without a due date (finished one-offs or unscheduled) last.
+        return list.OrderBy(x => x.DueOn is null).ThenBy(x => x.DueOn).ThenBy(x => x.Title)
+            .Select(x => new MaintenanceTaskDto(x.Id, x.PropertyId, x.FixtureId, x.Title, x.IntervalValue, x.IntervalUnit, x.DueOn, x.LastCompletedOn, x.Supplier, x.EstimatedCost, x.Notes, x.Property?.Name ?? "", x.Fixture?.Name, NormalizeCurrency(x.Property?.Currency) ?? "USD"))
+            .ToList();
+    }
     static async Task<Dictionary<Guid, string>> RoomPaths(InventoryDbContext db) =>
         await db.Rooms.Include(x => x.Floor).ThenInclude(x => x!.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
     // Rooms using a paint: explicit library assignments plus painted surfaces whose colour code, or colour name and brand, match.
@@ -795,6 +921,8 @@ public static class InventoryApi
         var roomPaints = await db.RoomPaints.ToListAsync();
         var roomPhotos = await db.RoomPhotos.ToListAsync();
         var fixturePhotos = await db.FixturePhotos.ToListAsync();
+        var tasks = await db.MaintenanceTasks.ToListAsync();
+        var records = await db.MaintenanceRecords.ToListAsync();
         // Records keep the backup ID they were imported with, so backup → restore → backup cycles produce the same IDs.
         static string Ext(IHasExternalId x) => x.ExternalId ?? x.Id.ToString();
         var propertyIds = props.ToDictionary(x => x.Id, Ext);
@@ -804,6 +932,7 @@ public static class InventoryApi
         var assetIds = assets.ToDictionary(x => x.Id, Ext);
         var fixtureIds = fixtures.ToDictionary(x => x.Id, Ext);
         var paintIds = paints.ToDictionary(x => x.Id, Ext);
+        var taskIds = tasks.ToDictionary(x => x.Id, Ext);
         return new(1,
             props.Select(x => new ImportProperty(Ext(x), x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes, NormalizeCurrency(x.Currency) ?? "USD")).ToList(),
             floors.Select(x => new ImportFloor(Ext(x), propertyIds[x.PropertyId], x.Name, x.Notes)).ToList(),
@@ -817,7 +946,9 @@ public static class InventoryApi
             paints.Select(x => new ImportPaint(Ext(x), x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes)).ToList(),
             roomPaints.Select(x => new ImportRoomPaint($"{roomIds[x.RoomId]}:{paintIds[x.PaintId]}", roomIds[x.RoomId], paintIds[x.PaintId], x.SortOrder, x.Surface)).ToList(),
             roomPhotos.Select(x => new ImportRoomPhoto(Ext(x), roomIds[x.RoomId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
-            fixturePhotos.Select(x => new ImportFixturePhoto(Ext(x), fixtureIds[x.FixtureId], x.StorageKey, x.Caption, x.SortOrder)).ToList());
+            fixturePhotos.Select(x => new ImportFixturePhoto(Ext(x), fixtureIds[x.FixtureId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
+            tasks.Select(x => new ImportMaintenanceTask(Ext(x), propertyIds[x.PropertyId], x.FixtureId is Guid fixtureId ? fixtureIds[fixtureId] : null, x.Title, x.IntervalValue, x.IntervalUnit, x.DueOn, x.LastCompletedOn, x.Supplier, x.EstimatedCost, x.Notes)).ToList(),
+            records.Select(x => new ImportMaintenanceRecord(Ext(x), taskIds[x.TaskId], x.CompletedOn, x.Cost, x.Supplier, x.Notes)).ToList());
     }
     // Maps every existing row of one type by its backup ID and its database ID, so imports can recognise records they already hold.
     static async Task<Dictionary<string, Guid>> ExistingIds<T>(IQueryable<T> rows) where T : class, IHasExternalId
@@ -840,10 +971,12 @@ public static class InventoryApi
         var roomPaints = i.RoomPaints ?? [];
         var roomPhotos = i.RoomPhotos ?? [];
         var fixturePhotos = i.FixturePhotos ?? [];
+        var tasks = i.MaintenanceTasks ?? [];
+        var records = i.MaintenanceRecords ?? [];
         var ids = i.Properties.Select(x => x.ExternalId).Concat(i.Floors.Select(x => x.ExternalId)).Concat(i.Rooms.Select(x => x.ExternalId)).Concat(i.Surfaces.Select(x => x.ExternalId))
             .Concat(i.StorageLocations.Select(x => x.ExternalId)).Concat(i.Assets.Select(x => x.ExternalId)).Concat(i.PropertyPhotos.Select(x => x.ExternalId)).Concat(fixtures.Select(x => x.ExternalId))
             .Concat(assetPhotos.Select(x => x.ExternalId)).Concat(paints.Select(x => x.ExternalId)).Concat(roomPaints.Select(x => x.ExternalId)).Concat(roomPhotos.Select(x => x.ExternalId))
-            .Concat(fixturePhotos.Select(x => x.ExternalId)).ToList();
+            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).ToList();
         if (ids.Any(string.IsNullOrWhiteSpace) || ids.Count != ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");
         var propIds = i.Properties.Select(x => x.ExternalId).ToHashSet();
         var floorIds = i.Floors.Select(x => x.ExternalId).ToHashSet();
@@ -860,6 +993,16 @@ public static class InventoryApi
         if (paints.Any(x => string.IsNullOrWhiteSpace(x.Brand) || string.IsNullOrWhiteSpace(x.ColorName))) errors.Add("Paints require a brand and colour name.");
         if (roomPhotos.Any(x => string.IsNullOrWhiteSpace(x.StorageKey)) || fixturePhotos.Any(x => string.IsNullOrWhiteSpace(x.StorageKey))) errors.Add("Room and fixture photos require a storage key.");
         if (roomPaints.GroupBy(x => (x.RoomExternalId, x.PaintExternalId)).Any(x => x.Count() > 1)) errors.Add("A paint can only be assigned to a room once.");
+        var taskIds = tasks.Select(x => x.ExternalId).ToHashSet();
+        if (tasks.Any(x => string.IsNullOrWhiteSpace(x.Title) || (x.IntervalValue is not null || x.IntervalUnit is not null) && (x.IntervalValue is not > 0 || !IntervalUnits.Contains(x.IntervalUnit?.ToLowerInvariant()))))
+            errors.Add("Maintenance tasks require a title, and a repeat interval must be a positive number of days, months or years.");
+        var fixtureRooms = fixtures.GroupBy(x => x.ExternalId).ToDictionary(x => x.Key, x => x.First().RoomExternalId);
+        var roomFloors = i.Rooms.GroupBy(x => x.ExternalId).ToDictionary(x => x.Key, x => x.First().FloorExternalId);
+        var floorProperties = i.Floors.GroupBy(x => x.ExternalId).ToDictionary(x => x.Key, x => x.First().PropertyExternalId);
+        if (tasks.Any(x => !propIds.Contains(x.PropertyExternalId) || x.FixtureExternalId is not null && !fixtureIds.Contains(x.FixtureExternalId)) || records.Any(x => !taskIds.Contains(x.TaskExternalId)))
+            errors.Add("Maintenance tasks must reference an imported property (and fixture, if any), and service records an imported task.");
+        else if (tasks.Any(x => x.FixtureExternalId is not null && fixtureRooms.TryGetValue(x.FixtureExternalId, out var room) && roomFloors.TryGetValue(room, out var floor) && floorProperties.TryGetValue(floor, out var property) && property != x.PropertyExternalId))
+            errors.Add("A maintenance task's fixture must be in the task's property.");
         if (i.Floors.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Rooms.Any(x => !floorIds.Contains(x.FloorExternalId)) || i.StorageLocations.Any(x => !propIds.Contains(x.PropertyExternalId))
             || i.Assets.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.PropertyPhotos.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Surfaces.Any(x => !roomIds.Contains(x.RoomExternalId))
             || fixtures.Any(x => !roomIds.Contains(x.RoomExternalId)) || assetPhotos.Any(x => !assetIds.Contains(x.AssetExternalId)) || roomPhotos.Any(x => !roomIds.Contains(x.RoomExternalId))
@@ -878,9 +1021,10 @@ public static class InventoryApi
             + await CountExisting(db.StorageLocations, i.StorageLocations.Select(x => x.ExternalId)) + await CountExisting(db.Fixtures, fixtures.Select(x => x.ExternalId))
             + await CountExisting(db.Paints, paints.Select(x => x.ExternalId)) + await CountExisting(db.PropertyPhotos, i.PropertyPhotos.Select(x => x.ExternalId))
             + await CountExisting(db.AssetPhotos, assetPhotos.Select(x => x.ExternalId)) + await CountExisting(db.RoomPhotos, roomPhotos.Select(x => x.ExternalId))
-            + await CountExisting(db.FixturePhotos, fixturePhotos.Select(x => x.ExternalId));
+            + await CountExisting(db.FixturePhotos, fixturePhotos.Select(x => x.ExternalId))
+            + await CountExisting(db.MaintenanceTasks, tasks.Select(x => x.ExternalId)) + await CountExisting(db.MaintenanceRecords, records.Select(x => x.ExternalId));
         var photoCount = i.PropertyPhotos.Count + assetPhotos.Count + roomPhotos.Count + fixturePhotos.Count;
-        return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount, existingCount);
+        return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount, existingCount, tasks.Count);
     }
     static async Task<int> CountExisting<T>(IQueryable<T> rows, IEnumerable<string> externalIds) where T : class, IHasExternalId
     {

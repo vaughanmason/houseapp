@@ -10,6 +10,7 @@ else
     <div class="row g-3 mb-4">
         <div class="col-md-4"><div class="card p-3"><div class="text-muted">Active assets</div><strong class="display-6">@dashboard.AssetCount</strong></div></div>
         <div class="col-md-4"><div class="card p-3"><div class="text-muted">Fixtures</div><strong class="display-6">@dashboard.FixtureCount</strong></div></div>
+        <div class="col-md-4"><a class="card p-3 text-decoration-none @(dashboard.MaintenanceOverdue > 0 ? "border-danger" : "")" href="maintenance"><div class="text-muted">Maintenance</div><strong class="display-6">@dashboard.MaintenanceOverdue overdue</strong><div class="small text-muted">@dashboard.MaintenanceDueSoon due in the next 30 days</div></a></div>
         @foreach (var total in dashboard.Totals)
         {
             <div class="col-md-4"><div class="card p-3"><div class="text-muted">Current insured value (@total.Currency)</div><strong class="display-6"><CurrencyDisplay Value="total.TotalValue" CurrencyCode="@total.Currency" /></strong></div></div>

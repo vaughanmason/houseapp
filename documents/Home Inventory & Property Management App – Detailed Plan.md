@@ -29,7 +29,7 @@ Property
 ```
 Everything belongs somewhere.  
 
-Implementation status (2026-10-04): Modules 1–5 and 12 (Paint Library) are implemented. Modules 6, 7, 9, 15 and 17 are partially implemented. Modules 8, 10, 11, 13, 14 and 16 are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
+Implementation status (2026-10-04): Modules 1–5, 10 (Maintenance) and 12 (Paint Library) are implemented. Modules 6, 7, 9, 15 and 17 are partially implemented. Modules 8, 11, 13, 14 and 16 are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
   
 ⸻  
   
@@ -275,6 +275,7 @@ Receipts
 ⸻  
   
 ## Module 10 – Maintenance  
+Status: Implemented. Tasks on a property or fixture, one-off or recurring (days/months/years), service history with cost and supplier, automatic next-due dates, dashboard counts and backup support. Photos on service records come with the uploads module.
 Track recurring maintenance.  
 Examples  
 ```

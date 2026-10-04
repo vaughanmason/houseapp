@@ -29,6 +29,7 @@ The server launch profile uses `https://localhost:7060` and `http://localhost:50
 - Cascades: Property → floors/locations/assets/property photos/rooms, Floor → rooms, Room → surfaces/fixtures/room photos/room paints, Fixture/Asset → their photos, Paint → room paints. Restrictive: storage-location parent, asset room, asset storage location. Check for dependent assets before deleting rooms or floors.
 - `dotnet-ef` is pinned as a local tool (`dotnet tool restore`) and a model snapshot exists, so use `dotnet ef migrations add <Name> --project HomeInventory`. Keep the generated `.Designer.cs`: SQLite table rebuilds need it. The six oldest migrations are hand-written; leave them as they are.
 - Endpoint handlers trim optional text fields, return `Results.ValidationProblem` for required-field validation where established, and use `Results.BadRequest` for invalid cross-entity references. Maintain these response patterns for existing resource types.
+- Maintenance tasks belong to a property and optionally one of its fixtures; completing a task records history and sets the next due date from the completion date (one-off tasks end with no due date).
 - Currency is a per-property 3-letter ISO code normalized by `NormalizeCurrency` (defaults to `USD`).
 
 ## Import/export contract
