@@ -289,15 +289,19 @@ public static class InventoryApi
                 MaintenanceSchedule = input.MaintenanceSchedule?.Trim(),
                 LastMaintenanceDate = input.LastMaintenanceDate,
                 Condition = input.Condition?.Trim(),
-                Notes = input.Notes?.Trim()
+                Notes = input.Notes?.Trim(),
+                Category = FixtureCategory(input.Category),
+                Provider = input.Provider?.Trim(),
+                AccountNumber = input.AccountNumber?.Trim()
             };
             db.Fixtures.Add(entity);
             await db.SaveChangesAsync();
             return Results.Created($"/api/fixtures/{entity.Id}", (await FixtureDtos(db, db.Fixtures.Where(x => x.Id == entity.Id))).Single());
         });
-        api.MapGet("/fixtures", async (Guid? roomId, Guid? propertyId, InventoryDbContext db) =>
+        api.MapGet("/fixtures", async (Guid? roomId, Guid? propertyId, string? category, InventoryDbContext db) =>
         {
             var fixtures = db.Fixtures.AsQueryable();
+            if (!string.IsNullOrWhiteSpace(category)) { var normalized = FixtureCategory(category); fixtures = fixtures.Where(x => x.Category == normalized); }
             if (roomId is not null) fixtures = fixtures.Where(x => x.RoomId == roomId.Value);
             else if (propertyId is not null) fixtures = fixtures.Where(x => x.Room != null && x.Room.Floor != null && x.Room.Floor.PropertyId == propertyId.Value);
             return Results.Ok(await FixtureDtos(db, fixtures));
@@ -334,6 +338,9 @@ public static class InventoryApi
             entity.LastMaintenanceDate = input.LastMaintenanceDate;
             entity.Condition = input.Condition?.Trim();
             entity.Notes = input.Notes?.Trim();
+            entity.Category = FixtureCategory(input.Category);
+            entity.Provider = input.Provider?.Trim();
+            entity.AccountNumber = input.AccountNumber?.Trim();
             await db.SaveChangesAsync();
             return Results.Ok((await FixtureDtos(db, db.Fixtures.Where(x => x.Id == entity.Id))).Single());
         });
@@ -888,7 +895,7 @@ public static class InventoryApi
 
             foreach (var fixture in (inventory.Fixtures ?? []).Where(x => !fixtures.ContainsKey(x.ExternalId)))
             {
-                var entity = new Fixture { ExternalId = fixture.ExternalId, RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, MaintenanceSchedule = fixture.MaintenanceSchedule, LastMaintenanceDate = fixture.LastMaintenanceDate, Condition = fixture.Condition, Notes = fixture.Notes };
+                var entity = new Fixture { ExternalId = fixture.ExternalId, RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, MaintenanceSchedule = fixture.MaintenanceSchedule, LastMaintenanceDate = fixture.LastMaintenanceDate, Condition = fixture.Condition, Notes = fixture.Notes, Category = FixtureCategory(fixture.Category), Provider = fixture.Provider, AccountNumber = fixture.AccountNumber };
                 db.Fixtures.Add(entity);
                 fixtures[fixture.ExternalId] = entity.Id;
             }
@@ -969,7 +976,8 @@ public static class InventoryApi
     }
     public sealed record ImportConfirmation(InventoryExport Inventory, List<string> SkipExternalIds);
     static PropertyDto ToDto(Property x) => new(x.Id, x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes, x.Currency);
-    static FixtureDto ToDto(Fixture x, string? locationPath) => new(x.Id, x.RoomId, x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, locationPath);
+    static FixtureDto ToDto(Fixture x, string? locationPath) => new(x.Id, x.RoomId, x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, locationPath, x.Category, x.Provider, x.AccountNumber);
+    static string FixtureCategory(string? value) => string.Equals(value?.Trim(), "Utility", StringComparison.OrdinalIgnoreCase) ? "Utility" : "Fixture";
     static FloorDto ToDto(Floor x) => new(x.Id, x.PropertyId, x.Name, x.Notes);
     static RoomDto ToDto(Room x) => new(x.Id, x.FloorId ?? Guid.Empty, x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes);
     static SurfaceDto ToDto(Surface x) => new(x.Id, x.RoomId, x.Name, x.SurfaceType, x.PaintBrand, x.ColorName, x.ColorCode, x.Finish, x.Coats, x.PaintedDate, x.Painter, x.QuantityPurchased, x.Manufacturer, x.ProductName, x.Material, x.Supplier, x.Warranty, x.Invoice, x.InstallationDate, x.Notes, x.SortOrder);
@@ -1175,7 +1183,7 @@ public static class InventoryApi
             locs.Select(x => new ImportStorageLocation(Ext(x), propertyIds[x.PropertyId], x.ParentId is Guid parentId ? locationIds[parentId] : null, x.Name, x.Type)).ToList(),
             assets.Select(x => new ImportAsset(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid roomId ? roomIds[roomId] : null, x.StorageLocationId is Guid locationId ? locationIds[locationId] : null, x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes)).ToList(),
             propertyPhotos.Select(x => new ImportPropertyPhoto(Ext(x), propertyIds[x.PropertyId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
-            fixtures.Select(x => new ImportFixture(Ext(x), roomIds[x.RoomId], x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes)).ToList(),
+            fixtures.Select(x => new ImportFixture(Ext(x), roomIds[x.RoomId], x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, x.Category, x.Provider, x.AccountNumber)).ToList(),
             assetPhotos.Select(x => new ImportAssetPhoto(Ext(x), assetIds[x.AssetId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
             paints.Select(x => new ImportPaint(Ext(x), x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes)).ToList(),
             roomPaints.Select(x => new ImportRoomPaint($"{roomIds[x.RoomId]}:{paintIds[x.PaintId]}", roomIds[x.RoomId], paintIds[x.PaintId], x.SortOrder, x.Surface)).ToList(),

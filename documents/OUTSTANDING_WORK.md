@@ -32,7 +32,7 @@ None open.
 - **Reusable components**: `Breadcrumb` isn't used on any page. `PropertySelector`/`ConfirmDialog` are used only on some pages.
 - **Fixtures/assets** can't be moved between properties from the UI except through the asset edit form.
 
-Resolved on 2026-10-04: property delete (blocked while it has assets, with a typed-name confirm), surface add/edit with type-specific fields, room photo UI, storage location rename/re-parent, the asset Move picker, the "Used in" paint view (`GET /api/paints/{id}/usage`), search over paints and surfaces, and a Rooms-page bug where saving a room wiped its paint details. Also resolved: full ZIP backup and restore including uploaded files, document and photo uploads (FileStore, Documents page, shared PhotoManager, warranty/receipt dashboard counts), the Maintenance module (tasks, service history, dashboard counts, backup support), a guard stopping rooms that hold assets from moving to another property, and idempotent imports (`ExternalId` on every importable entity, migration `AddExternalIdsToImportedEntities`), and storage locations import in any order, with missing parents and cycles rejected.
+Resolved on 2026-10-04: property delete (blocked while it has assets, with a typed-name confirm), surface add/edit with type-specific fields, room photo UI, storage location rename/re-parent, the asset Move picker, the "Used in" paint view (`GET /api/paints/{id}/usage`), search over paints and surfaces, and a Rooms-page bug where saving a room wiped its paint details. Also resolved: utilities as a fixture category (module 11), full ZIP backup and restore including uploaded files, document and photo uploads (FileStore, Documents page, shared PhotoManager, warranty/receipt dashboard counts), the Maintenance module (tasks, service history, dashboard counts, backup support), a guard stopping rooms that hold assets from moving to another property, and idempotent imports (`ExternalId` on every importable entity, migration `AddExternalIdsToImportedEntities`), and storage locations import in any order, with missing parents and cycles rejected.
 
 ## P3 – Planned modules not yet started (from the product plan)
 
@@ -40,7 +40,6 @@ Resolved on 2026-10-04: property delete (blocked while it has assets, with a typ
 |--------|-------|
 | 6 – Home Inventory extras | Barcode, QR, receipt, manual and warranty fields on assets |
 | 8 – Documents | Done, except OCR text (planned with the AI features) |
-| 11 – Utilities | Electrical panel, meters, solar, inverter, and similar. Only free-text `UtilitiesNotes` on Room today |
 | 13 – Asset history | Audit trail of moves and repairs ("nothing gets deleted") |
 | 14 – Insurance | Per-currency totals now exist on the dashboard. Still needs an insurance report and PDF export |
 | 16 – QR codes | Generate and print labels for storage locations/assets, plus deep links |
@@ -60,7 +59,7 @@ Resolved on 2026-10-04: property delete (blocked while it has assets, with a typ
 - Most nav-menu icon classes (`bi-tools-nav-menu`, `bi-palette-nav-menu`, and others) have no CSS rule, so those menu items show no icon. Only house, list, plus and calendar are defined in `NavMenu.razor.css`.
 - `/api/search` and the asset/fixture DTO helpers load whole tables into memory. That's fine at household scale, but it won't scale.
 - `AssetDtos`, `ValidateAsset` and the import confirm handler are still dense one-liners. Split them when you touch them.
-- Test coverage: 33 API tests. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
+- Test coverage: 34 API tests. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
 - No `.editorconfig` or extra analyzers.
 - The product plan suggests Flutter/offline-first and cloud sync. The current implementation is Blazor WASM, local-only. That needs a deliberate decision before multi-device work starts.
 
@@ -71,7 +70,6 @@ Resolved: the template pages, placeholder test and stale TODO were removed, GitH
 1. ~~Tidy-up and CI~~ (done).
 2. ~~Close the P2 UI gaps~~ (done). ~~Backup IDs on every entity~~ (done: imports are idempotent).
 3. ~~Maintenance (module 10)~~ and ~~documents/photo uploads (8/9)~~ (done). Remaining modules, using the agreed defaults:
-   - Utilities: a kind of fixture.
    - Asset history: key events only (bought, moved, repaired, archived).
    - Insurance: a printable HTML report saved as PDF by the browser.
    - QR codes: printable labels now, network access later.

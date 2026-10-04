@@ -159,6 +159,11 @@ public sealed class Fixture : IHasExternalId
     public DateOnly? LastMaintenanceDate { get; set; }
     public string? Condition { get; set; }
     public string? Notes { get; set; }
+    /// <summary>"Fixture" (sink, cupboard...) or "Utility" (meter, inverter, internet...); utilities reuse everything fixtures have.</summary>
+    public string Category { get; set; } = "Fixture";
+    /// <summary>Utility provider and account/meter number, e.g. the electricity supplier.</summary>
+    public string? Provider { get; set; }
+    public string? AccountNumber { get; set; }
     public Room? Room { get; set; }
     public List<FixturePhoto> Photos { get; set; } = [];
 }
@@ -344,6 +349,9 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<Fixture>().Property(x => x.MaintenanceSchedule).HasMaxLength(400);
         model.Entity<Fixture>().Property(x => x.Condition).HasMaxLength(80);
         model.Entity<Fixture>().Property(x => x.Notes).HasMaxLength(1000);
+        model.Entity<Fixture>().Property(x => x.Category).HasMaxLength(20).HasDefaultValue("Fixture").IsRequired();
+        model.Entity<Fixture>().Property(x => x.Provider).HasMaxLength(160);
+        model.Entity<Fixture>().Property(x => x.AccountNumber).HasMaxLength(120);
         model.Entity<FixturePhoto>().Property(x => x.StorageKey).HasMaxLength(512).IsRequired();
         model.Entity<FixturePhoto>().Property(x => x.Caption).HasMaxLength(240);
         model.Entity<StorageLocation>().Property(x => x.Name).HasMaxLength(160).IsRequired();

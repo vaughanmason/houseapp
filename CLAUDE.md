@@ -37,7 +37,7 @@ Property (Currency, Photos)
 ├── Floor
 │   └── Room            (Room.PropertyId is a denormalized copy of Floor.PropertyId; set it whenever FloorId changes)
 │       ├── Surface     (SurfaceType: wall/ceiling/flooring/trim + paint/material metadata)
-│       ├── Fixture ── FixturePhoto
+│       ├── Fixture ── FixturePhoto   (Category "Fixture" or "Utility"; utilities add Provider/AccountNumber)
 │       ├── RoomPhoto
 │       └── RoomPaint ──► Paint   (global paint library; composite key RoomId+PaintId)
 ├── StorageLocation     (self-referencing tree via ParentId, scoped to one property)

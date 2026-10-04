@@ -1,23 +1,46 @@
 @page "/fixtures"
 @inject HttpClient Http
 
-<PageTitle>Fixtures</PageTitle>
+<PageTitle>@(Category == "Utility" ? "Utilities" : "Fixtures")</PageTitle>
 
-<div class="mb-4">
-    <h1>Fixtures</h1>
-    <p class="lead">Manage permanent fixtures in your rooms.</p>
+<div class="mb-4 d-flex justify-content-between align-items-start">
+    <div>
+        <h1>@(Category == "Utility" ? "Utilities" : Category == "Fixture" ? "Fixtures" : "Fixtures & utilities")</h1>
+        <p class="lead">Permanent items in your rooms, and utilities such as meters, solar, inverters and internet.</p>
+    </div>
+    <div class="btn-group">
+        <a class="btn btn-sm @(Category is null ? "btn-secondary" : "btn-outline-secondary")" href="fixtures">All</a>
+        <a class="btn btn-sm @(Category == "Fixture" ? "btn-secondary" : "btn-outline-secondary")" href="fixtures?category=Fixture">Fixtures</a>
+        <a class="btn btn-sm @(Category == "Utility" ? "btn-secondary" : "btn-outline-secondary")" href="fixtures?category=Utility">Utilities</a>
+    </div>
 </div>
 
 <div class="row g-4">
     <div class="col-lg-6">
         <div class="card card-body">
-            <h2 class="h4">@(editingFixtureId is null ? "Add fixture" : "Edit fixture")</h2>
+            <h2 class="h4">@(editingFixtureId is null ? $"Add {fixtureCategory.ToLowerInvariant()}" : $"Edit {fixtureCategory.ToLowerInvariant()}")</h2>
+            <div class="btn-group mb-2" role="group">
+                <input type="radio" class="btn-check" name="category" id="cat-fixture" checked="@(fixtureCategory == "Fixture")" @onchange="@(() => fixtureCategory = "Fixture")" />
+                <label class="btn btn-outline-primary btn-sm" for="cat-fixture">Fixture</label>
+                <input type="radio" class="btn-check" name="category" id="cat-utility" checked="@(fixtureCategory == "Utility")" @onchange="@(() => fixtureCategory = "Utility")" />
+                <label class="btn btn-outline-primary btn-sm" for="cat-utility">Utility</label>
+            </div>
             <select class="form-select mb-2" @bind="roomId">
                 <option value="">Choose room</option>
                 @foreach (var room in rooms.OrderBy(r => r.Name)) { <option value="@room.Id">@room.Name</option> }
             </select>
-            <input class="form-control mb-2" @bind="fixtureName" placeholder="Fixture name" />
-            <input class="form-control mb-2" @bind="fixtureType" placeholder="Fixture type" />
+            <input class="form-control mb-2" @bind="fixtureName" placeholder="@(fixtureCategory == "Utility" ? "Name (e.g. Main electricity meter)" : "Fixture name")" />
+            <input class="form-control mb-2" @bind="fixtureType" list="fixture-types" placeholder="Type" />
+            <datalist id="fixture-types">
+                @foreach (var type in fixtureCategory == "Utility" ? UtilityTypes : FixtureTypes) { <option value="@type" /> }
+            </datalist>
+            @if (fixtureCategory == "Utility")
+            {
+                <div class="row g-2 mb-2">
+                    <div class="col-md-6"><input class="form-control" @bind="fixtureProvider" placeholder="Provider (e.g. City Power, ISP)" /></div>
+                    <div class="col-md-6"><input class="form-control" @bind="fixtureAccountNumber" placeholder="Account / meter number" /></div>
+                </div>
+            }
 
             <h5 class="mt-3">Identification</h5>
             <input class="form-control mb-2" @bind="fixtureManufacturer" placeholder="Manufacturer" />
@@ -52,28 +75,33 @@
     </div>
 
     <div class="col-lg-6">
-        <h2 class="h4">Fixtures by room</h2>
+        <h2 class="h4">By room</h2>
         @if (rooms.Count == 0)
         {
             <div class="alert alert-info">No rooms found. <a href="rooms">Create a room first</a>.</div>
         }
-        else if (fixtures.Count == 0)
+        else if (Visible().Count == 0)
         {
-            <div class="alert alert-info">No fixtures yet. Add one to the left.</div>
+            <div class="alert alert-info">Nothing here yet. Add one to the left.</div>
         }
         else
         {
-            @foreach (var room in rooms.Where(r => fixtures.Any(f => f.RoomId == r.Id)).OrderBy(r => r.Name))
+            @foreach (var room in rooms.Where(r => Visible().Any(f => f.RoomId == r.Id)).OrderBy(r => r.Name))
             {
                 <div class="mb-3">
                     <h5>@room.Name</h5>
                     <ul class="list-group">
-                        @foreach (var fixture in fixtures.Where(f => f.RoomId == room.Id).OrderBy(f => f.Name))
+                        @foreach (var fixture in Visible().Where(f => f.RoomId == room.Id).OrderBy(f => f.Name))
                         {
                             <li class="list-group-item">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
                                         <strong>@fixture.Name</strong> <span class="text-muted">@fixture.Type</span>
+                                        @if (fixture.Category == "Utility") { <span class="badge text-bg-info">Utility</span> }
+                                        @if (!string.IsNullOrEmpty(fixture.Provider) || !string.IsNullOrEmpty(fixture.AccountNumber))
+                                        {
+                                            <div class="small text-muted">@fixture.Provider @(string.IsNullOrEmpty(fixture.AccountNumber) ? "" : $"· account {fixture.AccountNumber}")</div>
+                                        }
                                         <div class="small text-muted">
                                             @if (!string.IsNullOrEmpty(fixture.Manufacturer) || !string.IsNullOrEmpty(fixture.Model))
                                             {
@@ -138,7 +166,21 @@
     string roomId = "", fixtureName = "", fixtureType = "", fixtureManufacturer = "", fixtureModel = "", fixtureSerialNumber = "";
     string fixturePurchaseDate = "", fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "";
     string fixtureInstallerName = "", fixtureInstallationDate = "", fixtureMaintenanceSchedule = "", fixtureLastMaintenanceDate = "", fixtureCondition = "", fixtureNotes = "";
-    string photoFixtureId = "";
+    string photoFixtureId = "", fixtureCategory = "Fixture", fixtureProvider = "", fixtureAccountNumber = "";
+
+    static readonly string[] FixtureTypes = ["Sink", "Toilet", "Shower", "Bath", "Built-in cupboard", "Window", "Door", "Air conditioner", "Ceiling fan", "Light fitting", "Alarm", "Oven", "Hob", "Extractor"];
+    static readonly string[] UtilityTypes = ["Electrical panel", "Electricity meter", "Water meter", "Gas meter", "Solar panels", "Battery", "Inverter", "Generator", "Geyser", "Heat pump", "Borehole", "Pool pump", "Internet", "Water tank"];
+
+    [SupplyParameterFromQuery]
+    public string? Category { get; set; }
+
+    List<FixtureDto> Visible() => Category is null ? fixtures : fixtures.Where(f => f.Category == Category).ToList();
+
+    protected override void OnParametersSet()
+    {
+        if (Category is not null) Category = Category.Equals("Utility", StringComparison.OrdinalIgnoreCase) ? "Utility" : "Fixture";
+        if (editingFixtureId is null) fixtureCategory = Category ?? fixtureCategory;
+    }
 
     Guid? editingFixtureId;
     string? error;
@@ -171,6 +213,9 @@
         fixtureLastMaintenanceDate = fixture.LastMaintenanceDate?.ToString("yyyy-MM-dd") ?? "";
         fixtureCondition = fixture.Condition ?? "";
         fixtureNotes = fixture.Notes ?? "";
+        fixtureCategory = fixture.Category;
+        fixtureProvider = fixture.Provider ?? "";
+        fixtureAccountNumber = fixture.AccountNumber ?? "";
     }
 
     void CancelEdit()
@@ -184,17 +229,19 @@
         roomId = fixtureName = fixtureType = fixtureManufacturer = fixtureModel = fixtureSerialNumber = "";
         fixturePurchaseDate = fixturePurchasePrice = fixtureCurrentValue = fixtureWarranty = fixtureManualUrl = "";
         fixtureInstallerName = fixtureInstallationDate = fixtureMaintenanceSchedule = fixtureLastMaintenanceDate = fixtureCondition = fixtureNotes = "";
+        fixtureProvider = fixtureAccountNumber = "";
+        fixtureCategory = Category ?? "Fixture";
     }
 
     async Task SaveFixture()
     {
         error = null;
         if (!Guid.TryParse(roomId, out var parsedRoomId)) { error = "Choose a room first."; return; }
-        if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(fixtureType)) { error = "Fixture name and type are required."; return; }
+        if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(fixtureType)) { error = "Name and type are required."; return; }
 
         var response = editingFixtureId is null
-            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes))
-            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes));
+            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null))
+            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null));
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingFixtureId = null;
@@ -220,7 +267,6 @@
         return property?.Currency ?? "USD";
     }
 
-    static DateTime? TryDate(string? value) => DateTime.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
     static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
     static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
     static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;

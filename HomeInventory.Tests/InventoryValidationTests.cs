@@ -754,6 +754,35 @@ public sealed class InventoryValidationTests
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/import/zip", new ByteArrayContent("not a zip"u8.ToArray()))).StatusCode);
     }
 
+    [Fact]
+    public async Task Utilities_AreFixturesWithCategoryProviderAndAccount()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var room = await CreateRoomAsync(source, (await CreateFloorAsync(source, property.Id)).Id);
+            await source.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id));
+            var meter = await (await source.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id) with { Name = "Electricity meter", Type = "Electricity meter", Category = "utility", Provider = " City Power ", AccountNumber = "ACC-42" })).Content.ReadFromJsonAsync<FixtureDto>();
+            Assert.Equal(("Utility", "City Power", "ACC-42"), (meter!.Category, meter.Provider, meter.AccountNumber));
+
+            var utilities = await source.GetFromJsonAsync<List<FixtureDto>>("/api/fixtures?category=Utility");
+            Assert.Equal("Electricity meter", Assert.Single(utilities!).Name);
+            Assert.Equal("Sink", Assert.Single((await source.GetFromJsonAsync<List<FixtureDto>>("/api/fixtures?category=Fixture"))!).Name);
+
+            // Utilities get maintenance like any fixture.
+            await CreateTaskAsync(source, new MaintenanceTaskInput(property.Id, meter.Id, "Read meter", 1, "months", null, null, null, null));
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
+        var restored = Assert.Single((await target.GetFromJsonAsync<List<FixtureDto>>("/api/fixtures?category=utility"))!);
+        Assert.Equal(("Utility", "City Power", "ACC-42"), (restored.Category, restored.Provider, restored.AccountNumber));
+    }
+
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
