@@ -1,0 +1,242 @@
+@page "/documents"
+@inject HttpClient Http
+
+<PageTitle>Documents</PageTitle>
+
+<div class="mb-4">
+    <h1>Documents</h1>
+    <p class="lead">Receipts, invoices, manuals, warranties and plans, kept with the things they belong to.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card card-body">
+            <h2 class="h4">@(editingId is null ? "Add document" : "Edit document")</h2>
+            <select class="form-select mb-2" @bind="formPropertyId" @bind:after="PropertyChanged">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+            @if (!string.IsNullOrEmpty(formPropertyId))
+            {
+                <select class="form-select mb-2" @bind="formAttachment">
+                    <option value="">Whole property</option>
+                    @if (assets.Count > 0) { <optgroup label="Assets">@foreach (var a in assets) { <option value="asset:@a.Id">@a.Name</option> }</optgroup> }
+                    @if (fixtures.Count > 0) { <optgroup label="Fixtures">@foreach (var f in fixtures) { <option value="fixture:@f.Id">@f.Name · @f.LocationPath</option> }</optgroup> }
+                    @if (rooms.Count > 0) { <optgroup label="Rooms">@foreach (var r in rooms) { <option value="room:@r.Id">@r.Name</option> }</optgroup> }
+                    @if (tasks.Count > 0) { <optgroup label="Maintenance">@foreach (var t in tasks) { <option value="task:@t.Id">@t.Title</option> }</optgroup> }
+                </select>
+            }
+            <div class="row g-2 mb-2">
+                <div class="col-md-5">
+                    <select class="form-select" @bind="formKind">
+                        @foreach (var kind in Kinds) { <option value="@kind">@kind</option> }
+                    </select>
+                </div>
+                <div class="col-md-7"><input class="form-control" @bind="formTitle" placeholder="Title (defaults to the file name)" /></div>
+            </div>
+            <label class="form-label small text-muted mb-1">@(editingId is null ? "File (image or PDF, up to 20 MB)" : "Replace file (optional)")</label>
+            <InputFile OnChange="e => selectedFile = e.File" accept="image/*,.heic,application/pdf" class="form-control mb-2" />
+            <div class="row g-2 mb-2">
+                <div class="col-md-6"><label class="form-label small text-muted mb-1">Document date</label><input class="form-control" type="date" @bind="formDate" /></div>
+                <div class="col-md-6"><label class="form-label small text-muted mb-1">Expires (warranties, insurance)</label><input class="form-control" type="date" @bind="formExpires" /></div>
+            </div>
+            <input class="form-control mb-2" @bind="formTags" placeholder="Tags (comma separated)" />
+            <textarea class="form-control mb-2" @bind="formNotes" placeholder="Notes"></textarea>
+            <div>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@busy">@(busy ? "Saving…" : editingId is null ? "Add document" : "Update document")</button>
+                @if (editingId is not null) { <button class="btn btn-outline-secondary ms-2" @onclick="ClearForm">Cancel</button> }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="row g-2 mb-3">
+            <div class="col-md-4">
+                <select class="form-select" @bind="filterPropertyId">
+                    <option value="">All properties</option>
+                    @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" @bind="filterKind">
+                    <option value="">All kinds</option>
+                    @foreach (var kind in Kinds) { <option value="@kind">@kind</option> }
+                </select>
+            </div>
+            <div class="col-md-5"><input class="form-control" @bind="filterText" @bind:event="oninput" placeholder="Search title, tags, notes…" /></div>
+        </div>
+        @if (properties.Count == 0)
+        {
+            <div class="alert alert-info">No properties found. <a href="properties">Create a property first</a>.</div>
+        }
+        else if (Filtered().Count == 0)
+        {
+            <div class="alert alert-info">@(documents.Count == 0 ? "No documents yet. Add one to the left." : "No documents match the filters.")</div>
+        }
+        else
+        {
+            <ul class="list-group">
+                @foreach (var doc in Filtered())
+                {
+                    var url = PhotoManager.FileUrl(doc.StorageKey);
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>@doc.Title</strong> <span class="badge text-bg-light">@doc.Kind</span>
+                                @if (doc.ExpiresOn is DateOnly expires)
+                                {
+                                    var (css, label) = expires < Today ? ("danger", "expired") : expires <= Today.AddDays(90) ? ("warning", "expires soon") : ("secondary", "expires");
+                                    <span class="badge text-bg-@css">@label @expires.ToString("yyyy-MM-dd")</span>
+                                }
+                                <div class="small text-muted">@(doc.AttachedTo ?? "Whole property") · @doc.PropertyName @(doc.DocumentDate is null ? "" : $"· {doc.DocumentDate:yyyy-MM-dd}")</div>
+                                @if (!string.IsNullOrEmpty(doc.Tags)) { <div class="small text-muted">Tags: @doc.Tags</div> }
+                                @if (!string.IsNullOrEmpty(doc.Notes)) { <div class="small text-muted">@doc.Notes</div> }
+                                <div class="small text-muted">@doc.FileName @(doc.SizeBytes is long size ? $"({FormatSize(size)})" : "")</div>
+                            </div>
+                            <div class="text-nowrap">
+                                @if (url is not null) { <a class="btn btn-sm btn-outline-secondary me-1" href="@url" target="_blank">Open</a> }
+                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditAsync(doc)">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => deleting = doc">Delete</button>
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+<ConfirmDialog Show="deleting is not null"
+               Title="Delete document"
+               Message="@($"Delete \"{deleting?.Title}\" and its file?")"
+               OnConfirm="DeleteAsync"
+               OnCancel="() => deleting = null" />
+
+@if (error is not null)
+{
+    <div class="alert alert-danger mt-3">@error</div>
+}
+
+@code {
+    const long MaxUploadBytes = 20 * 1024 * 1024;
+    static readonly string[] Kinds = ["Receipt", "Invoice", "Manual", "Warranty", "Insurance", "Certificate", "Plan", "Photo", "Other"];
+    static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    List<PropertyDto> properties = [];
+    List<DocumentDto> documents = [];
+    List<AssetDto> assets = [];
+    List<FixtureDto> fixtures = [];
+    List<RoomDto> rooms = [];
+    List<MaintenanceTaskDto> tasks = [];
+
+    Guid? editingId;
+    DocumentDto? editing, deleting;
+    IBrowserFile? selectedFile;
+    string formPropertyId = "", formAttachment = "", formKind = "Receipt", formTitle = "", formTags = "", formNotes = "";
+    DateOnly? formDate, formExpires;
+    string filterPropertyId = "", filterKind = "", filterText = "";
+    bool busy;
+    string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        await ReloadAsync();
+    }
+
+    async Task ReloadAsync() => documents = await Http.GetFromJsonAsync<List<DocumentDto>>("api/documents") ?? [];
+
+    List<DocumentDto> Filtered() => documents
+        .Where(d => filterPropertyId == "" || d.PropertyId.ToString() == filterPropertyId)
+        .Where(d => filterKind == "" || d.Kind == filterKind)
+        .Where(d => string.IsNullOrWhiteSpace(filterText) || $"{d.Title} {d.Tags} {d.Notes} {d.FileName} {d.AttachedTo}".Contains(filterText, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    async Task PropertyChanged()
+    {
+        formAttachment = "";
+        await LoadTargetsAsync();
+    }
+
+    async Task LoadTargetsAsync()
+    {
+        assets = []; fixtures = []; rooms = []; tasks = [];
+        if (!Guid.TryParse(formPropertyId, out var propertyId)) return;
+        assets = await Http.GetFromJsonAsync<List<AssetDto>>($"api/assets?propertyId={propertyId}&archived=false") ?? [];
+        fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>($"api/fixtures?propertyId={propertyId}") ?? [];
+        rooms = await Http.GetFromJsonAsync<List<RoomDto>>($"api/rooms?propertyId={propertyId}") ?? [];
+        tasks = await Http.GetFromJsonAsync<List<MaintenanceTaskDto>>($"api/maintenance?propertyId={propertyId}") ?? [];
+    }
+
+    async Task StartEditAsync(DocumentDto doc)
+    {
+        editingId = doc.Id;
+        editing = doc;
+        selectedFile = null;
+        formPropertyId = doc.PropertyId.ToString();
+        await LoadTargetsAsync();
+        formAttachment = doc.AssetId is Guid a ? $"asset:{a}" : doc.FixtureId is Guid f ? $"fixture:{f}" : doc.RoomId is Guid r ? $"room:{r}" : doc.MaintenanceTaskId is Guid t ? $"task:{t}" : "";
+        formKind = doc.Kind;
+        formTitle = doc.Title;
+        formDate = doc.DocumentDate;
+        formExpires = doc.ExpiresOn;
+        formTags = doc.Tags ?? "";
+        formNotes = doc.Notes ?? "";
+    }
+
+    void ClearForm()
+    {
+        editingId = null;
+        editing = null;
+        selectedFile = null;
+        formAttachment = formTitle = formTags = formNotes = "";
+        formKind = "Receipt";
+        formDate = formExpires = null;
+    }
+
+    async Task SaveAsync()
+    {
+        error = null;
+        if (!Guid.TryParse(formPropertyId, out var propertyId)) { error = "Choose a property first."; return; }
+        if (editingId is null && selectedFile is null) { error = "Choose a file to upload."; return; }
+        if (selectedFile is not null && selectedFile.Size > MaxUploadBytes) { error = "Files must be 20 MB or smaller."; return; }
+        busy = true;
+        try
+        {
+            var (storageKey, fileName, contentType, size) = (editing?.StorageKey, editing?.FileName, editing?.ContentType, editing?.SizeBytes);
+            if (selectedFile is not null)
+            {
+                using var content = new MultipartFormDataContent();
+                content.Add(new StreamContent(selectedFile.OpenReadStream(MaxUploadBytes)), "file", selectedFile.Name);
+                var upload = await Http.PostAsync("api/files", content);
+                if (!upload.IsSuccessStatusCode) { error = await upload.Content.ReadAsStringAsync(); return; }
+                var file = (await upload.Content.ReadFromJsonAsync<UploadedFileDto>())!;
+                (storageKey, fileName, contentType, size) = (file.StorageKey, file.FileName, file.ContentType, file.SizeBytes);
+            }
+            Guid? Target(string prefix) => formAttachment.StartsWith(prefix) ? Guid.Parse(formAttachment[prefix.Length..]) : null;
+            var title = string.IsNullOrWhiteSpace(formTitle) ? Path.GetFileNameWithoutExtension(fileName ?? "Document") : formTitle;
+            var input = new DocumentInput(propertyId, Target("room:"), Target("fixture:"), Target("asset:"), Target("task:"), title, formKind, storageKey!, fileName, contentType, size, formDate, formExpires, formTags, formNotes);
+            var response = editingId is null
+                ? await Http.PostAsJsonAsync("api/documents", input)
+                : await Http.PutAsJsonAsync($"api/documents/{editingId}", input);
+            if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+            ClearForm();
+            await ReloadAsync();
+        }
+        finally { busy = false; }
+    }
+
+    async Task DeleteAsync()
+    {
+        if (deleting is null) return;
+        error = null;
+        var id = deleting.Id;
+        deleting = null;
+        var response = await Http.DeleteAsync($"api/documents/{id}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        if (editingId == id) ClearForm();
+        await ReloadAsync();
+    }
+
+    static string FormatSize(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024:0.0} MB" : $"{Math.Max(1, bytes / 1024)} KB";
+}

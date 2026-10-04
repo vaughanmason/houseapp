@@ -212,28 +212,7 @@
 
     <div class="card card-body mt-4">
         <h3 class="h5">Room photos</h3>
-        <div class="row g-2 mb-2">
-            <div class="col-md-6"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key or file path" /></div>
-            <div class="col-md-4"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
-            <div class="col-md-2"><input class="form-control" @bind="photoSortOrder" type="number" title="Sort order" placeholder="Order" /></div>
-        </div>
-        <div><button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button></div>
-        @if (photos.Count == 0)
-        {
-            <div class="alert alert-info">No photos yet.</div>
-        }
-        else
-        {
-            <ul class="list-group">
-                @foreach (var photo in photos.OrderBy(p => p.SortOrder))
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
-                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
-                    </li>
-                }
-            </ul>
-        }
+        <PhotoManager Endpoint="@($"api/rooms/{selectedRoomId}/photos")" />
     </div>
 }
 
@@ -252,12 +231,10 @@
     string roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomPaintDetails = "", roomWindowsCount = "", roomDoorsCount = "";
     string roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
     static readonly string[] SurfaceTypes = ["wall", "ceiling", "flooring", "trim"];
-    List<PhotoMetadataDto> photos = [];
     string selectedRoomId = "", surfaceName = "", surfaceType = "wall", surfaceSortOrder = "0", surfaceNotes = "";
     string surfacePaintBrand = "", surfaceColorName = "", surfaceColorCode = "", surfaceFinish = "", surfaceCoats = "", surfacePainter = "", surfaceQuantity = "";
     DateOnly? surfacePaintedDate, surfaceInstallationDate;
     string surfaceManufacturer = "", surfaceProductName = "", surfaceMaterial = "", surfaceSupplier = "", surfaceWarranty = "", surfaceInvoice = "";
-    string photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
     Guid? editingSurfaceId;
     
     Guid? editingRoomId;
@@ -334,11 +311,9 @@
     async Task LoadRoomDetails()
     {
         surfaces = [];
-        photos = [];
         ClearSurfaceForm();
         if (!Guid.TryParse(selectedRoomId, out var roomId)) return;
         surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
-        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/rooms/{roomId}/photos") ?? [];
     }
 
     void StartEditSurface(SurfaceDto surface)
@@ -405,26 +380,6 @@
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         if (editingSurfaceId == surfaceId) ClearSurfaceForm();
         surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{selectedRoomId}/surfaces") ?? [];
-    }
-
-    async Task AddPhoto()
-    {
-        error = null;
-        if (!Guid.TryParse(selectedRoomId, out var roomId)) { error = "Choose a room first."; return; }
-        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Storage key is required."; return; }
-        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/photos", new PhotoMetadataInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        photoStorageKey = photoCaption = "";
-        photoSortOrder = "0";
-        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/rooms/{roomId}/photos") ?? [];
-    }
-
-    async Task DeletePhoto(Guid photoId)
-    {
-        error = null;
-        var response = await Http.DeleteAsync($"api/rooms/{selectedRoomId}/photos/{photoId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/rooms/{selectedRoomId}/photos") ?? [];
     }
 
     string RoomLabel(RoomDto room)

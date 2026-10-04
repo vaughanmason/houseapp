@@ -206,34 +206,13 @@
     <div class="col-12">
         <div class="card card-body">
             <h2 class="h4">Asset photos</h2>
-            <select class="form-select mb-2" @bind="photoAssetId" @bind:after="LoadPhotos">
+            <select class="form-select mb-2" @bind="photoAssetId">
                 <option value="">Choose asset</option>
                 @foreach (var asset in assets.OrderBy(a => a.Name)) { <option value="@asset.Id">@asset.Name</option> }
             </select>
             @if (!string.IsNullOrEmpty(photoAssetId))
             {
-                <div class="row g-2 mb-2">
-                    <div class="col-md-7"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key" /></div>
-                    <div class="col-md-5"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
-                </div>
-                <input class="form-control mb-2" @bind="photoSortOrder" type="number" placeholder="Sort order" />
-                <button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button>
-                @if (photos.Count > 0)
-                {
-                    <ul class="list-group">
-                        @foreach (var photo in photos.OrderBy(p => p.SortOrder))
-                        {
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
-                            </li>
-                        }
-                    </ul>
-                }
-                else
-                {
-                    <div class="alert alert-info">No photos yet.</div>
-                }
+                <PhotoManager Endpoint="@($"api/assets/{photoAssetId}/photos")" />
             }
         </div>
     </div>
@@ -250,13 +229,12 @@
     List<RoomDto> rooms = [];
     List<StorageLocationDto> locations = [];
     List<AssetDto> assets = [];
-    List<AssetPhotoDto> photos = [];
 
     string propertyId = "", roomId = "", storageLocationId = "", assetName = "", assetCategory = "", assetDescription = "";
     string assetBrand = "", assetModel = "", assetSerialNumber = "", assetPurchaseDate = "";
     string assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "";
     string storagePropertyId = "", newStorageParentId = "", newStorageName = "", newStorageType = "";
-    string photoAssetId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
+    string photoAssetId = "";
     string searchQuery = "";
     bool showArchived;
     Guid? editingLocationId, movingAssetId;
@@ -440,34 +418,6 @@
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         if (editingLocationId == locationId) ClearStorageForm();
         locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
-    }
-
-    async Task LoadPhotos()
-    {
-        photos = [];
-        if (!Guid.TryParse(photoAssetId, out var assetId)) return;
-        photos = await Http.GetFromJsonAsync<List<AssetPhotoDto>>($"api/assets/{assetId}/photos") ?? [];
-    }
-
-    async Task AddPhoto()
-    {
-        error = null;
-        if (!Guid.TryParse(photoAssetId, out var assetId)) { error = "Choose an asset first."; return; }
-        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Provide a storage key for the photo."; return; }
-        var response = await Http.PostAsJsonAsync($"api/assets/{assetId}/photos", new AssetPhotoInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        photoStorageKey = photoCaption = "";
-        photoSortOrder = "0";
-        await LoadPhotos();
-    }
-
-    async Task DeletePhoto(Guid photoId)
-    {
-        error = null;
-        if (!Guid.TryParse(photoAssetId, out var assetId)) { error = "Choose an asset first."; return; }
-        var response = await Http.DeleteAsync($"api/assets/{assetId}/photos/{photoId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadPhotos();
     }
 
     string GetPropertyCurrency(Guid? propertyId) => properties.FirstOrDefault(x => x.Id == propertyId)?.Currency ?? "USD";

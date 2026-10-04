@@ -567,6 +567,141 @@ public sealed class InventoryValidationTests
         Assert.Equal(900m, Assert.Single((await target.GetFromJsonAsync<List<MaintenanceRecordDto>>($"/api/maintenance/{task2.Id}/history"))!).Cost);
     }
 
+    static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 1, 2, 3];
+    static readonly byte[] PdfBytes = "%PDF-1.7\n% test document\n"u8.ToArray();
+
+    [Fact]
+    public async Task Upload_SniffsTypeEnforcesLimitAndServesFile()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+
+        var uploaded = await UploadAsync(client, PngBytes, "kitchen.jpg"); // misleading name: the stored type comes from the bytes
+        Assert.Matches(@"^\d{4}/\d{2}/[0-9a-f]{32}\.png$", uploaded.StorageKey);
+        Assert.Equal("image/png", uploaded.ContentType);
+        Assert.Equal("kitchen.jpg", uploaded.FileName);
+
+        var download = await client.GetAsync($"/api/files/{uploaded.StorageKey}");
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        Assert.Equal("image/png", download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("nosniff", download.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal(PngBytes, await download.Content.ReadAsByteArrayAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostFileAsync(client, "<script>alert(1)</script>"u8.ToArray(), "photo.png")).StatusCode);
+        var tooBig = new byte[FileStore.MaxBytes + 1];
+        PdfBytes.CopyTo(tooBig, 0);
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostFileAsync(client, tooBig, "huge.pdf")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/files/..%2F..%2Finventory.db")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/files/2026/01/{Guid.NewGuid():N}.png")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Documents_AttachValidateSearchAndDriveDashboard()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var home = await CreatePropertyAsync(client, "Home");
+        var cottage = await CreatePropertyAsync(client, "Cottage");
+        var tv = await CreateAssetAsync(client, home.Id, null, null, "TV");
+        await CreateAssetAsync(client, home.Id, null, null, "Sofa");
+        var cottageAsset = await CreateAssetAsync(client, cottage.Id, null, null, "Kettle");
+        var file = await UploadAsync(client, PdfBytes, "receipt.pdf");
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        DocumentInput Doc(Guid propertyId, string title, string kind, Guid? assetId = null, DateOnly? expires = null, Guid? roomId = null) =>
+            new(propertyId, roomId, null, assetId, null, title, kind, file.StorageKey, file.FileName, file.ContentType, file.SizeBytes, today, expires, "electronics, samsung", null);
+
+        var receipt = await client.PostAsJsonAsync("/api/documents", Doc(home.Id, "TV receipt", "Receipt", tv.Id));
+        Assert.Equal(HttpStatusCode.Created, receipt.StatusCode);
+        Assert.Equal("Asset: TV", (await receipt.Content.ReadFromJsonAsync<DocumentDto>())!.AttachedTo);
+        await client.PostAsJsonAsync("/api/documents", Doc(home.Id, "TV warranty", "Warranty", tv.Id, today.AddDays(60)));
+        await client.PostAsJsonAsync("/api/documents", Doc(home.Id, "Old warranty", "Warranty", tv.Id, today.AddDays(-1)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/documents", Doc(home.Id, "Wrong property", "Receipt", cottageAsset.Id))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/documents", Doc(home.Id, "Bad kind", "Selfie"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/documents", Doc(home.Id, "Two targets", "Receipt", tv.Id, roomId: Guid.NewGuid()))).StatusCode);
+
+        var dashboard = await client.GetFromJsonAsync<DashboardDto>("/api/dashboard");
+        Assert.Equal(1, dashboard!.WarrantiesExpiring);
+        Assert.Equal(2, dashboard.AssetsMissingReceipts); // Sofa and the cottage kettle
+
+        Assert.Equal(3, (await client.GetFromJsonAsync<List<DocumentDto>>($"/api/documents?assetId={tv.Id}"))!.Count);
+        Assert.Equal(2, (await client.GetFromJsonAsync<List<DocumentDto>>("/api/documents?kind=Warranty"))!.Count);
+        var results = await client.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=samsung");
+        Assert.Equal(3, results!.Count(x => x.Kind == "Document"));
+    }
+
+    [Fact]
+    public async Task DeletingPhotosDocumentsAndRooms_RemovesFilesNoLongerUsed()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var room = await CreateRoomAsync(client, (await CreateFloorAsync(client, property.Id)).Id);
+        var shared = await UploadAsync(client, PngBytes, "shared.png");
+        var roomOnly = await UploadAsync(client, PngBytes, "room.png");
+        bool Exists(UploadedFileDto f) => File.Exists(Path.Combine(factory.FilesPath, f.StorageKey));
+
+        var photo = await (await client.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput(shared.StorageKey, null, 0))).Content.ReadFromJsonAsync<PhotoMetadataDto>();
+        var document = await (await client.PostAsJsonAsync("/api/documents", new DocumentInput(property.Id, null, null, null, null, "Front", "Photo", shared.StorageKey, null, null, null, null, null, null, null))).Content.ReadFromJsonAsync<DocumentDto>();
+        await client.PostAsJsonAsync($"/api/rooms/{room.Id}/photos", new PhotoMetadataInput(roomOnly.StorageKey, null, 0));
+
+        await client.DeleteAsync($"/api/properties/{property.Id}/photos/{photo!.Id}");
+        Assert.True(Exists(shared)); // still used by the document
+        await client.DeleteAsync($"/api/documents/{document!.Id}");
+        Assert.False(Exists(shared));
+
+        Assert.True(Exists(roomOnly));
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/rooms/{room.Id}")).StatusCode);
+        Assert.False(Exists(roomOnly));
+    }
+
+    [Fact]
+    public async Task Documents_RoundTripThroughBackupAndSurviveRoomDelete()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var room = await CreateRoomAsync(source, (await CreateFloorAsync(source, property.Id)).Id);
+            var asset = await CreateAssetAsync(source, property.Id, null, null, "TV");
+            var file = await UploadAsync(source, PdfBytes, "manual.pdf");
+            await source.PostAsJsonAsync("/api/documents", new DocumentInput(property.Id, null, null, asset.Id, null, "TV manual", "Manual", file.StorageKey, file.FileName, file.ContentType, file.SizeBytes, null, null, null, null));
+            var plan = await (await source.PostAsJsonAsync("/api/documents", new DocumentInput(property.Id, room.Id, null, null, null, "Lounge plan", "Plan", file.StorageKey, null, null, null, null, null, null, null))).Content.ReadFromJsonAsync<DocumentDto>();
+
+            // Deleting the room keeps its document at property level instead of losing it.
+            await source.DeleteAsync($"/api/rooms/{room.Id}");
+            var kept = Assert.Single((await source.GetFromJsonAsync<List<DocumentDto>>("/api/documents"))!, x => x.Id == plan!.Id);
+            Assert.Null(kept.RoomId);
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+        Assert.Equal(2, backup.Documents!.Count);
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        var preview = (await (await target.PostAsJsonAsync("/api/import/preview", backup)).Content.ReadFromJsonAsync<ImportPreviewDto>())!;
+        Assert.True(preview.IsValid, string.Join("; ", preview.Errors));
+        Assert.Equal(2, preview.Documents);
+        for (var attempt = 0; attempt < 2; attempt++)
+            Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() })).StatusCode);
+        var documents = (await target.GetFromJsonAsync<List<DocumentDto>>("/api/documents"))!;
+        Assert.Equal(2, documents.Count);
+        Assert.Equal("Asset: TV", Assert.Single(documents, x => x.Kind == "Manual").AttachedTo);
+    }
+
+    private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
+    {
+        using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
+        return await client.PostAsync("/api/files", content);
+    }
+
+    private static async Task<UploadedFileDto> UploadAsync(HttpClient client, byte[] bytes, string fileName)
+    {
+        var response = await PostFileAsync(client, bytes, fileName);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<UploadedFileDto>())!;
+    }
+
     private static async Task<MaintenanceTaskDto> CreateTaskAsync(HttpClient client, MaintenanceTaskInput input)
     {
         var response = await client.PostAsJsonAsync("/api/maintenance", input);

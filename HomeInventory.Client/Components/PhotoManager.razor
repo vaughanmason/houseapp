@@ -1,0 +1,116 @@
+@using System.Text.RegularExpressions
+@inject HttpClient Http
+
+@* Lists, uploads and deletes the photos behind one photo endpoint (e.g. api/rooms/{id}/photos). *@
+<div>
+    <div class="row g-2 mb-2">
+        <div class="col-md-5"><InputFile OnChange="UploadAsync" accept="image/*,.heic" class="form-control" disabled="@busy" /></div>
+        <div class="col-md-5"><input class="form-control" @bind="caption" placeholder="Caption (optional)" /></div>
+        <div class="col-md-2"><input class="form-control" type="number" @bind="sortOrder" title="Sort order" placeholder="Order" /></div>
+    </div>
+    <details class="mb-3">
+        <summary class="small text-muted">Or link a file stored elsewhere</summary>
+        <div class="input-group mt-2">
+            <input class="form-control" @bind="externalKey" placeholder="Path or URL" />
+            <button class="btn btn-outline-primary" @onclick="AddExternalAsync" disabled="@busy">Add</button>
+        </div>
+    </details>
+    @if (busy) { <div class="small text-muted mb-2">Uploading…</div> }
+    @if (error is not null) { <div class="alert alert-danger py-2">@error</div> }
+
+    @if (photos.Count == 0)
+    {
+        <div class="alert alert-info">No photos yet.</div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var photo in photos.OrderBy(p => p.SortOrder))
+            {
+                var url = FileUrl(photo.StorageKey);
+                <div class="col-6 col-md-4 col-lg-3">
+                    <div class="card h-100">
+                        @if (url is not null && !photo.StorageKey.EndsWith(".heic"))
+                        {
+                            <a href="@url" target="_blank"><img src="@url" class="card-img-top" style="height: 140px; object-fit: cover;" alt="@photo.Caption" /></a>
+                        }
+                        <div class="card-body p-2">
+                            <div class="small"><strong>@photo.Caption</strong></div>
+                            @if (url is null) { <div class="small text-muted text-break">@photo.StorageKey</div> }
+                            else if (photo.StorageKey.EndsWith(".heic")) { <a class="small" href="@url" target="_blank">Download HEIC photo</a> }
+                            <button class="btn btn-sm btn-outline-danger mt-1" @onclick="() => DeleteAsync(photo.Id)">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    const long MaxUploadBytes = 20 * 1024 * 1024;
+
+    [Parameter, EditorRequired]
+    public string Endpoint { get; set; } = "";
+
+    List<PhotoMetadataDto> photos = [];
+    string caption = "", externalKey = "", loadedEndpoint = "";
+    int sortOrder;
+    bool busy;
+    string? error;
+
+    /// <summary>URL for a file uploaded through /api/files; null for keys that point somewhere else.</summary>
+    public static string? FileUrl(string? key) => key is not null && Regex.IsMatch(key, @"^\d{4}/\d{2}/[0-9a-f]{32}\.\w+$") ? $"api/files/{key}" : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Endpoint == loadedEndpoint) return;
+        loadedEndpoint = Endpoint;
+        error = null;
+        await ReloadAsync();
+    }
+
+    async Task ReloadAsync() => photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>(Endpoint) ?? [];
+
+    async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        error = null;
+        if (e.File.Size > MaxUploadBytes) { error = "Photos must be 20 MB or smaller."; return; }
+        busy = true;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            content.Add(new StreamContent(e.File.OpenReadStream(MaxUploadBytes)), "file", e.File.Name);
+            var upload = await Http.PostAsync("api/files", content);
+            if (!upload.IsSuccessStatusCode) { error = await upload.Content.ReadAsStringAsync(); return; }
+            var file = (await upload.Content.ReadFromJsonAsync<UploadedFileDto>())!;
+            await AddAsync(file.StorageKey, string.IsNullOrWhiteSpace(caption) ? Path.GetFileNameWithoutExtension(file.FileName) : caption);
+        }
+        finally { busy = false; }
+    }
+
+    async Task AddExternalAsync()
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(externalKey)) { error = "Enter a path or URL."; return; }
+        await AddAsync(externalKey, caption);
+        if (error is null) externalKey = "";
+    }
+
+    async Task AddAsync(string storageKey, string? photoCaption)
+    {
+        var response = await Http.PostAsJsonAsync(Endpoint, new PhotoMetadataInput(storageKey, photoCaption, sortOrder));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        caption = "";
+        sortOrder = 0;
+        await ReloadAsync();
+    }
+
+    async Task DeleteAsync(Guid photoId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"{Endpoint}/{photoId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        await ReloadAsync();
+    }
+}

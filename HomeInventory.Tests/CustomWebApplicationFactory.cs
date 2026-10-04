@@ -12,6 +12,9 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
 
+    /// <summary>Per-factory upload folder so tests never touch the real %LOCALAPPDATA% files.</summary>
+    public string FilesPath { get; } = Path.Combine(Path.GetTempPath(), "HomeInventoryTests", Guid.NewGuid().ToString("N"));
+
     public CustomWebApplicationFactory()
     {
         _connection.Open();
@@ -25,6 +28,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll(typeof(DbContextOptions<InventoryDbContext>));
             services.RemoveAll(typeof(InventoryDbContext));
             services.AddSingleton(_connection);
+            services.RemoveAll<FileStore>();
+            services.AddSingleton(new FileStore(FilesPath));
             services.AddDbContext<InventoryDbContext>((serviceProvider, options) =>
             {
                 options.UseSqlite(serviceProvider.GetRequiredService<SqliteConnection>());
@@ -38,6 +43,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         if (disposing)
         {
             _connection.Dispose();
+            if (Directory.Exists(FilesPath)) Directory.Delete(FilesPath, recursive: true);
         }
     }
 }

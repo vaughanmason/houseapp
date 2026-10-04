@@ -112,34 +112,13 @@
     <div class="col-12">
         <div class="card card-body">
             <h2 class="h4">Fixture photos</h2>
-            <select class="form-select mb-2" @bind="photoFixtureId" @bind:after="LoadPhotos">
+            <select class="form-select mb-2" @bind="photoFixtureId">
                 <option value="">Choose fixture</option>
                 @foreach (var fixture in fixtures.OrderBy(f => f.Name)) { <option value="@fixture.Id">@fixture.Name</option> }
             </select>
             @if (!string.IsNullOrEmpty(photoFixtureId))
             {
-                <div class="row g-2 mb-2">
-                    <div class="col-md-7"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key" /></div>
-                    <div class="col-md-5"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
-                </div>
-                <input class="form-control mb-2" @bind="photoSortOrder" type="number" placeholder="Sort order" />
-                <button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button>
-                @if (photos.Count > 0)
-                {
-                    <ul class="list-group">
-                        @foreach (var photo in photos.OrderBy(p => p.SortOrder))
-                        {
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
-                            </li>
-                        }
-                    </ul>
-                }
-                else
-                {
-                    <div class="alert alert-info">No photos yet.</div>
-                }
+                <PhotoManager Endpoint="@($"api/fixtures/{photoFixtureId}/photos")" />
             }
         </div>
     </div>
@@ -155,12 +134,11 @@
     List<FixtureDto> fixtures = [];
     List<PropertyDto> properties = [];
     List<FloorDto> floors = [];
-    List<FixturePhotoDto> photos = [];
 
     string roomId = "", fixtureName = "", fixtureType = "", fixtureManufacturer = "", fixtureModel = "", fixtureSerialNumber = "";
     string fixturePurchaseDate = "", fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "";
     string fixtureInstallerName = "", fixtureInstallationDate = "", fixtureMaintenanceSchedule = "", fixtureLastMaintenanceDate = "", fixtureCondition = "", fixtureNotes = "";
-    string photoFixtureId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
+    string photoFixtureId = "";
 
     Guid? editingFixtureId;
     string? error;
@@ -230,34 +208,6 @@
         var response = await Http.DeleteAsync($"api/fixtures/{fixtureId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         fixtures = await Http.GetFromJsonAsync<List<FixtureDto>>("api/fixtures") ?? [];
-    }
-
-    async Task LoadPhotos()
-    {
-        photos = [];
-        if (!Guid.TryParse(photoFixtureId, out var fixtureId)) return;
-        photos = await Http.GetFromJsonAsync<List<FixturePhotoDto>>($"api/fixtures/{fixtureId}/photos") ?? [];
-    }
-
-    async Task AddPhoto()
-    {
-        error = null;
-        if (!Guid.TryParse(photoFixtureId, out var fixtureId)) { error = "Choose a fixture first."; return; }
-        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Provide a storage key for the photo."; return; }
-        var response = await Http.PostAsJsonAsync($"api/fixtures/{fixtureId}/photos", new FixturePhotoInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        photoStorageKey = photoCaption = "";
-        photoSortOrder = "0";
-        await LoadPhotos();
-    }
-
-    async Task DeletePhoto(Guid photoId)
-    {
-        error = null;
-        if (!Guid.TryParse(photoFixtureId, out var fixtureId)) { error = "Choose a fixture first."; return; }
-        var response = await Http.DeleteAsync($"api/fixtures/{fixtureId}/photos/{photoId}");
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadPhotos();
     }
 
     string? GetPropertyCurrency(FixtureDto fixture)

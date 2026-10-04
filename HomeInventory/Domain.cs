@@ -254,6 +254,35 @@ public sealed class MaintenanceRecord : IHasExternalId
     public MaintenanceTask? Task { get; set; }
 }
 
+/// <summary>A file (receipt, manual, warranty...) stored by <see cref="FileStore"/>, owned by a property and optionally attached to one room, fixture, asset or maintenance task.</summary>
+public sealed class Document : IHasExternalId
+{
+    public static readonly string[] Kinds = ["Receipt", "Invoice", "Manual", "Warranty", "Insurance", "Certificate", "Plan", "Photo", "Other"];
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string? ExternalId { get; set; }
+    public Guid PropertyId { get; set; }
+    public Guid? RoomId { get; set; }
+    public Guid? FixtureId { get; set; }
+    public Guid? AssetId { get; set; }
+    public Guid? MaintenanceTaskId { get; set; }
+    public required string Title { get; set; }
+    public required string Kind { get; set; }
+    public required string StorageKey { get; set; }
+    public string? FileName { get; set; }
+    public string? ContentType { get; set; }
+    public long? SizeBytes { get; set; }
+    public DateOnly? DocumentDate { get; set; }
+    public DateOnly? ExpiresOn { get; set; }
+    public string? Tags { get; set; }
+    public string? Notes { get; set; }
+    public Property? Property { get; set; }
+    public Room? Room { get; set; }
+    public Fixture? Fixture { get; set; }
+    public Asset? Asset { get; set; }
+    public MaintenanceTask? MaintenanceTask { get; set; }
+}
+
 public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : DbContext(options)
 {
     public DbSet<Property> Properties => Set<Property>();
@@ -271,6 +300,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<AssetPhoto> AssetPhotos => Set<AssetPhoto>();
     public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
     public DbSet<MaintenanceRecord> MaintenanceRecords => Set<MaintenanceRecord>();
+    public DbSet<Document> Documents => Set<Document>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -347,6 +377,20 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<MaintenanceRecord>().Property(x => x.Supplier).HasMaxLength(160);
         model.Entity<MaintenanceRecord>().Property(x => x.Notes).HasMaxLength(1000);
         model.Entity<MaintenanceRecord>().HasOne(x => x.Task).WithMany(x => x.Records).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<Document>().Property(x => x.Title).HasMaxLength(200).IsRequired();
+        model.Entity<Document>().Property(x => x.Kind).HasMaxLength(40).IsRequired();
+        model.Entity<Document>().Property(x => x.StorageKey).HasMaxLength(512).IsRequired();
+        model.Entity<Document>().Property(x => x.FileName).HasMaxLength(260);
+        model.Entity<Document>().Property(x => x.ContentType).HasMaxLength(100);
+        model.Entity<Document>().Property(x => x.Tags).HasMaxLength(400);
+        model.Entity<Document>().Property(x => x.Notes).HasMaxLength(2000);
+        model.Entity<Document>().HasOne(x => x.Property).WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
+        // Deleting what a document is attached to keeps the document at property level rather than losing a receipt or warranty.
+        model.Entity<Document>().HasOne(x => x.Room).WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<Document>().HasOne(x => x.Fixture).WithMany().HasForeignKey(x => x.FixtureId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<Document>().HasOne(x => x.Asset).WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<Document>().HasOne(x => x.MaintenanceTask).WithMany().HasForeignKey(x => x.MaintenanceTaskId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<Document>().HasIndex(x => x.ExpiresOn);
         foreach (var type in model.Model.GetEntityTypes().Select(x => x.ClrType).Where(typeof(IHasExternalId).IsAssignableFrom).ToList())
         {
             model.Entity(type).Property<string?>(nameof(IHasExternalId.ExternalId)).HasMaxLength(200);

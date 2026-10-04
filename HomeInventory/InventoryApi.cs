@@ -26,7 +26,7 @@ public static class InventoryApi
             if (currency is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["currency"] = ["Currency must be a three-letter ISO code."] });
             entity.Name = input.Name.Trim(); entity.Address = input.Address?.Trim(); entity.PurchaseDate = input.PurchaseDate; entity.PurchasePrice = input.PurchasePrice; entity.FloorArea = input.FloorArea; entity.Currency = currency; entity.Notes = input.Notes?.Trim(); await db.SaveChangesAsync(); return Results.Ok(ToDto(entity));
         });
-        api.MapDelete("/properties/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        api.MapDelete("/properties/{id:guid}", async (Guid id, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.Properties.FindAsync(id);
             if (entity is null) return Results.NotFound();
@@ -42,8 +42,10 @@ public static class InventoryApi
                 await db.SaveChangesAsync();
                 locations = locations.Except(leaves).ToList();
             }
+            var fileKeys = await FileKeysFor(db, propertyId: id);
             db.Properties.Remove(entity);
             await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, fileKeys);
             return Results.NoContent();
         });
 
@@ -82,14 +84,16 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Ok(ToDto(entity));
         });
-        api.MapDelete("/floors/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        api.MapDelete("/floors/{id:guid}", async (Guid id, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.Floors.FindAsync(id);
             if (entity is null) return Results.NotFound();
             var assetCount = await db.Assets.CountAsync(x => x.Room != null && x.Room.FloorId == id);
             if (assetCount > 0) return Results.BadRequest($"This floor still has {assetCount} asset(s) in its rooms. Move them before deleting the floor.");
+            var fileKeys = await FileKeysFor(db, floorId: id);
             db.Floors.Remove(entity);
             await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, fileKeys);
             return Results.NoContent();
         });
 
@@ -170,14 +174,16 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Ok(ToDto(entity));
         });
-        api.MapDelete("/rooms/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        api.MapDelete("/rooms/{id:guid}", async (Guid id, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.Rooms.FindAsync(id);
             if (entity is null) return Results.NotFound();
             var assetCount = await db.Assets.CountAsync(x => x.RoomId == id);
             if (assetCount > 0) return Results.BadRequest($"This room still holds {assetCount} asset(s). Move them before deleting the room.");
+            var fileKeys = await FileKeysFor(db, roomId: id);
             db.Rooms.Remove(entity);
             await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, fileKeys);
             return Results.NoContent();
         });
 
@@ -329,12 +335,14 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Ok((await FixtureDtos(db, db.Fixtures.Where(x => x.Id == entity.Id))).Single());
         });
-        api.MapDelete("/fixtures/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        api.MapDelete("/fixtures/{id:guid}", async (Guid id, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.Fixtures.FindAsync(id);
             if (entity is null) return Results.NotFound();
+            var fileKeys = await FileKeysFor(db, fixtureId: id);
             db.Fixtures.Remove(entity);
             await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, fileKeys);
             return Results.NoContent();
         });
         api.MapGet("/fixtures/{id:guid}/photos", async (Guid id, InventoryDbContext db) =>
@@ -351,12 +359,13 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Created($"/api/fixtures/{id}/photos/{entity.Id}", ToDto(entity));
         });
-        api.MapDelete("/fixtures/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db) =>
+        api.MapDelete("/fixtures/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.FixturePhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.FixtureId == id);
             if (entity is null) return Results.NotFound();
             db.FixturePhotos.Remove(entity);
             await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, [entity.StorageKey]);
             return Results.NoContent();
         });
 
@@ -423,16 +432,21 @@ public static class InventoryApi
             var entity = new PropertyPhoto { PropertyId = id, StorageKey = input.StorageKey.Trim(), Caption = input.Caption?.Trim(), SortOrder = input.SortOrder };
             db.PropertyPhotos.Add(entity); await db.SaveChangesAsync(); return Results.Created($"/api/properties/{id}/photos/{entity.Id}", ToDto(entity));
         });
-        api.MapPut("/properties/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, PhotoMetadataInput input, InventoryDbContext db) =>
+        api.MapPut("/properties/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, PhotoMetadataInput input, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.PropertyPhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.PropertyId == id); if (entity is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(input.StorageKey)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["storageKey"] = ["Storage key is required."] });
-            entity.StorageKey = input.StorageKey.Trim(); entity.Caption = input.Caption?.Trim(); entity.SortOrder = input.SortOrder; await db.SaveChangesAsync(); return Results.Ok(ToDto(entity));
+            var oldKey = entity.StorageKey;
+            entity.StorageKey = input.StorageKey.Trim(); entity.Caption = input.Caption?.Trim(); entity.SortOrder = input.SortOrder; await db.SaveChangesAsync();
+            if (oldKey != entity.StorageKey) await DeleteUnusedFiles(db, store, [oldKey]);
+            return Results.Ok(ToDto(entity));
         });
-        api.MapDelete("/properties/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db) =>
+        api.MapDelete("/properties/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.PropertyPhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.PropertyId == id); if (entity is null) return Results.NotFound();
-            db.PropertyPhotos.Remove(entity); await db.SaveChangesAsync(); return Results.NoContent();
+            db.PropertyPhotos.Remove(entity); await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, [entity.StorageKey]);
+            return Results.NoContent();
         });
         api.MapGet("/rooms/{id:guid}/photos", async (Guid id, InventoryDbContext db) =>
         {
@@ -446,16 +460,21 @@ public static class InventoryApi
             var entity = new RoomPhoto { RoomId = id, StorageKey = input.StorageKey.Trim(), Caption = input.Caption?.Trim(), SortOrder = input.SortOrder };
             db.RoomPhotos.Add(entity); await db.SaveChangesAsync(); return Results.Created($"/api/rooms/{id}/photos/{entity.Id}", ToDto(entity));
         });
-        api.MapPut("/rooms/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, PhotoMetadataInput input, InventoryDbContext db) =>
+        api.MapPut("/rooms/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, PhotoMetadataInput input, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.RoomPhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.RoomId == id); if (entity is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(input.StorageKey)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["storageKey"] = ["Storage key is required."] });
-            entity.StorageKey = input.StorageKey.Trim(); entity.Caption = input.Caption?.Trim(); entity.SortOrder = input.SortOrder; await db.SaveChangesAsync(); return Results.Ok(ToDto(entity));
+            var oldKey = entity.StorageKey;
+            entity.StorageKey = input.StorageKey.Trim(); entity.Caption = input.Caption?.Trim(); entity.SortOrder = input.SortOrder; await db.SaveChangesAsync();
+            if (oldKey != entity.StorageKey) await DeleteUnusedFiles(db, store, [oldKey]);
+            return Results.Ok(ToDto(entity));
         });
-        api.MapDelete("/rooms/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db) =>
+        api.MapDelete("/rooms/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.RoomPhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.RoomId == id); if (entity is null) return Results.NotFound();
-            db.RoomPhotos.Remove(entity); await db.SaveChangesAsync(); return Results.NoContent();
+            db.RoomPhotos.Remove(entity); await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, [entity.StorageKey]);
+            return Results.NoContent();
         });
 
         api.MapGet("/locations", async (Guid? propertyId, InventoryDbContext db) => await LocationDtos(db, propertyId));
@@ -550,12 +569,13 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Created($"/api/assets/{id}/photos/{entity.Id}", ToDto(entity));
         });
-        api.MapDelete("/assets/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db) =>
+        api.MapDelete("/assets/{id:guid}/photos/{photoId:guid}", async (Guid id, Guid photoId, InventoryDbContext db, FileStore store) =>
         {
             var entity = await db.AssetPhotos.SingleOrDefaultAsync(x => x.Id == photoId && x.AssetId == id);
             if (entity is null) return Results.NotFound();
             db.AssetPhotos.Remove(entity);
             await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, [entity.StorageKey]);
             return Results.NoContent();
         });
 
@@ -614,9 +634,65 @@ public static class InventoryApi
             return Results.Ok(await db.MaintenanceRecords.Where(x => x.TaskId == id).OrderByDescending(x => x.CompletedOn)
                 .Select(x => new MaintenanceRecordDto(x.Id, x.TaskId, x.CompletedOn, x.Cost, x.Supplier, x.Notes)).ToListAsync());
         });
+        api.MapPost("/files", async (IFormFile file, FileStore store) =>
+        {
+            await using var stream = file.OpenReadStream();
+            var (key, error) = await store.SaveAsync(stream, file.Length);
+            return key is null ? Results.BadRequest(error) : Results.Ok(new UploadedFileDto(key, System.IO.Path.GetFileName(file.FileName), FileStore.ContentTypeFor(key), file.Length));
+        }).DisableAntiforgery(); // multipart uploads from the local WASM client; JSON endpoints don't use antiforgery either
+        api.MapGet("/files/{**key}", (string key, FileStore store, HttpContext context) =>
+        {
+            var stream = store.Open(key);
+            if (stream is null) return Results.NotFound();
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            return Results.File(stream, FileStore.ContentTypeFor(key), enableRangeProcessing: true);
+        });
+
+        api.MapGet("/documents", async (Guid? propertyId, Guid? roomId, Guid? fixtureId, Guid? assetId, Guid? maintenanceTaskId, string? kind, InventoryDbContext db) =>
+        {
+            var documents = db.Documents.AsQueryable();
+            if (propertyId is not null) documents = documents.Where(x => x.PropertyId == propertyId);
+            if (roomId is not null) documents = documents.Where(x => x.RoomId == roomId);
+            if (fixtureId is not null) documents = documents.Where(x => x.FixtureId == fixtureId);
+            if (assetId is not null) documents = documents.Where(x => x.AssetId == assetId);
+            if (maintenanceTaskId is not null) documents = documents.Where(x => x.MaintenanceTaskId == maintenanceTaskId);
+            if (!string.IsNullOrWhiteSpace(kind)) documents = documents.Where(x => x.Kind == kind);
+            return Results.Ok(await DocumentDtos(db, documents));
+        });
+        api.MapPost("/documents", async (DocumentInput input, InventoryDbContext db) =>
+        {
+            var error = await ValidateDocument(input, db);
+            if (error is not null) return error;
+            var entity = new Document { Title = "", Kind = "", StorageKey = "" };
+            ApplyDocument(input, entity);
+            db.Documents.Add(entity);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/documents/{entity.Id}", (await DocumentDtos(db, db.Documents.Where(x => x.Id == entity.Id))).Single());
+        });
+        api.MapPut("/documents/{id:guid}", async (Guid id, DocumentInput input, InventoryDbContext db, FileStore store) =>
+        {
+            var entity = await db.Documents.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            var error = await ValidateDocument(input, db);
+            if (error is not null) return error;
+            var oldKey = entity.StorageKey;
+            ApplyDocument(input, entity);
+            await db.SaveChangesAsync();
+            if (oldKey != entity.StorageKey) await DeleteUnusedFiles(db, store, [oldKey]);
+            return Results.Ok((await DocumentDtos(db, db.Documents.Where(x => x.Id == id))).Single());
+        });
+        api.MapDelete("/documents/{id:guid}", async (Guid id, InventoryDbContext db, FileStore store) =>
+        {
+            var entity = await db.Documents.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            db.Documents.Remove(entity);
+            await db.SaveChangesAsync();
+            await DeleteUnusedFiles(db, store, [entity.StorageKey]);
+            return Results.NoContent();
+        });
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {
-            // TODO: Include expiring warranties, missing receipts, recent purchases, and room completion metrics.
+            // TODO: Include recent purchases and room completion metrics.
             // Values are only summed within one currency; properties with different currencies get separate totals.
             var assets = await db.Assets.Where(x => !x.IsArchived).Select(x => new { x.Category, Value = x.CurrentValue ?? 0, Currency = x.Property!.Currency }).ToListAsync();
             var fixtures = await db.Fixtures.Select(x => new { Category = x.Type, Value = x.CurrentValue ?? 0, Currency = x.Room!.Floor!.Property!.Currency }).ToListAsync();
@@ -632,7 +708,9 @@ public static class InventoryApi
                 .ToList();
             var today = Today();
             var dueDates = await db.MaintenanceTasks.Where(x => x.DueOn != null).Select(x => x.DueOn!.Value).ToListAsync();
-            return new DashboardDto(assets.Count, fixtures.Count, totals, dueDates.Count(x => x < today), dueDates.Count(x => x >= today && x <= today.AddDays(30)));
+            var warrantiesExpiring = await db.Documents.CountAsync(x => x.Kind == "Warranty" && x.ExpiresOn >= today && x.ExpiresOn <= today.AddDays(90));
+            var missingReceipts = await db.Assets.CountAsync(x => !x.IsArchived && !db.Documents.Any(d => d.AssetId == x.Id && (d.Kind == "Receipt" || d.Kind == "Invoice")));
+            return new DashboardDto(assets.Count, fixtures.Count, totals, dueDates.Count(x => x < today), dueDates.Count(x => x >= today && x <= today.AddDays(30)), warrantiesExpiring, missingReceipts);
         });
         api.MapGet("/search", async (string? q, InventoryDbContext db) =>
         {
@@ -652,10 +730,13 @@ public static class InventoryApi
             }
             var surfaceResults = surfaces.Where(x => $"{x.Name} {x.SurfaceType} {x.PaintBrand} {x.ColorName} {x.ColorCode} {x.Finish} {x.Material} {x.Manufacturer} {x.ProductName} {x.Notes}".ToLower().Contains(term))
                 .Select(x => new SearchResultDto("Surface", x.Id, x.Name, string.Join(" · ", new[] { x.SurfaceType, x.SurfaceType == "flooring" ? x.Material : x.PaintBrand, x.ColorName }.Where(y => !string.IsNullOrWhiteSpace(y))), roomPaths.GetValueOrDefault(x.RoomId)));
+            var documents = await DocumentDtos(db, db.Documents);
+            var documentResults = documents.Where(x => $"{x.Title} {x.Kind} {x.Tags} {x.Notes} {x.FileName}".ToLower().Contains(term))
+                .Select(x => new SearchResultDto("Document", x.Id, x.Title, x.Kind, x.AttachedTo ?? x.PropertyName));
             var results = assets.Where(x => $"{x.Name} {x.Category} {x.Brand} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Asset", x.Id, x.Name, x.Category, x.LocationPath))
                 .Concat(fixtures.Where(x => $"{x.Name} {x.Type} {x.Manufacturer} {x.Model} {x.SerialNumber} {x.Notes}".ToLower().Contains(term)).Select(x => new SearchResultDto("Fixture", x.Id, x.Name, x.Type, x.LocationPath)))
                 .Concat(locations.Where(x => $"{x.Name} {x.Type} {x.Path}".ToLower().Contains(term)).Select(x => new SearchResultDto("Storage", x.Id, x.Name, x.Type ?? "Storage location", x.Path)))
-                .Concat(paintResults).Concat(surfaceResults).Take(50);
+                .Concat(paintResults).Concat(surfaceResults).Concat(documentResults).Take(50);
             return Results.Ok(results);
         });
 
@@ -682,6 +763,7 @@ public static class InventoryApi
             var surfaces = await ExistingIds(db.Surfaces);
             var tasks = await ExistingIds(db.MaintenanceTasks);
             var records = await ExistingIds(db.MaintenanceRecords);
+            var documents = await ExistingIds(db.Documents);
 
             foreach (var property in inventory.Properties.Where(x => !properties.ContainsKey(x.ExternalId)))
             {
@@ -796,6 +878,19 @@ public static class InventoryApi
             }
             foreach (var record in (inventory.MaintenanceRecords ?? []).Where(x => !records.ContainsKey(x.ExternalId)))
                 db.MaintenanceRecords.Add(new MaintenanceRecord { ExternalId = record.ExternalId, TaskId = tasks[record.TaskExternalId], CompletedOn = record.CompletedOn, Cost = record.Cost, Supplier = record.Supplier?.Trim(), Notes = record.Notes?.Trim() });
+            foreach (var document in (inventory.Documents ?? []).Where(x => !documents.ContainsKey(x.ExternalId)))
+                db.Documents.Add(new Document
+                {
+                    ExternalId = document.ExternalId,
+                    PropertyId = properties[document.PropertyExternalId],
+                    RoomId = document.RoomExternalId is null ? null : rooms[document.RoomExternalId],
+                    FixtureId = document.FixtureExternalId is null ? null : fixtures[document.FixtureExternalId],
+                    // A skipped duplicate asset still maps to the existing asset; an asset skipped without a match leaves the document at property level.
+                    AssetId = document.AssetExternalId is not null && assets.TryGetValue(document.AssetExternalId, out var assetId) ? assetId : null,
+                    MaintenanceTaskId = document.MaintenanceTaskExternalId is null ? null : tasks[document.MaintenanceTaskExternalId],
+                    Title = document.Title.Trim(), Kind = document.Kind, StorageKey = document.StorageKey.Trim(), FileName = document.FileName, ContentType = document.ContentType, SizeBytes = document.SizeBytes,
+                    DocumentDate = document.DocumentDate, ExpiresOn = document.ExpiresOn, Tags = document.Tags?.Trim(), Notes = document.Notes?.Trim()
+                });
 
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
@@ -872,6 +967,76 @@ public static class InventoryApi
             .Select(x => new MaintenanceTaskDto(x.Id, x.PropertyId, x.FixtureId, x.Title, x.IntervalValue, x.IntervalUnit, x.DueOn, x.LastCompletedOn, x.Supplier, x.EstimatedCost, x.Notes, x.Property?.Name ?? "", x.Fixture?.Name, NormalizeCurrency(x.Property?.Currency) ?? "USD"))
             .ToList();
     }
+    // Uploaded files referenced by photos and documents that a cascade delete of this property, floor, room or fixture removes.
+    static async Task<List<string>> FileKeysFor(InventoryDbContext db, Guid? propertyId = null, Guid? floorId = null, Guid? roomId = null, Guid? fixtureId = null)
+    {
+        var rooms = db.Rooms.Where(x => propertyId != null && x.PropertyId == propertyId || floorId != null && x.FloorId == floorId || roomId != null && x.Id == roomId).Select(x => x.Id);
+        var fixtures = db.Fixtures.Where(x => rooms.Contains(x.RoomId) || fixtureId != null && x.Id == fixtureId).Select(x => x.Id);
+        var keys = await db.RoomPhotos.Where(x => rooms.Contains(x.RoomId)).Select(x => x.StorageKey).ToListAsync();
+        keys.AddRange(await db.FixturePhotos.Where(x => fixtures.Contains(x.FixtureId)).Select(x => x.StorageKey).ToListAsync());
+        if (propertyId is not null)
+        {
+            keys.AddRange(await db.PropertyPhotos.Where(x => x.PropertyId == propertyId).Select(x => x.StorageKey).ToListAsync());
+            keys.AddRange(await db.Documents.Where(x => x.PropertyId == propertyId).Select(x => x.StorageKey).ToListAsync());
+        }
+        return keys;
+    }
+    // Removes stored files that no photo or document references any more (call after SaveChanges).
+    static async Task DeleteUnusedFiles(InventoryDbContext db, FileStore store, IEnumerable<string> keys)
+    {
+        foreach (var key in keys.Where(FileStore.IsStoredKey).Distinct())
+        {
+            var used = await db.Documents.AnyAsync(x => x.StorageKey == key) || await db.PropertyPhotos.AnyAsync(x => x.StorageKey == key) || await db.RoomPhotos.AnyAsync(x => x.StorageKey == key)
+                || await db.FixturePhotos.AnyAsync(x => x.StorageKey == key) || await db.AssetPhotos.AnyAsync(x => x.StorageKey == key);
+            if (!used) store.Delete(key);
+        }
+    }
+    static async Task<IResult?> ValidateDocument(DocumentInput input, InventoryDbContext db)
+    {
+        var errors = new Dictionary<string, string[]>();
+        if (string.IsNullOrWhiteSpace(input.Title)) errors["title"] = ["Title is required."];
+        if (!Document.Kinds.Contains(input.Kind)) errors["kind"] = [$"Kind must be one of: {string.Join(", ", Document.Kinds)}."];
+        if (string.IsNullOrWhiteSpace(input.StorageKey)) errors["storageKey"] = ["Upload a file first."];
+        if (errors.Count > 0) return Results.ValidationProblem(errors);
+        if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return Results.BadRequest("The selected property does not exist.");
+        if (new[] { input.RoomId, input.FixtureId, input.AssetId, input.MaintenanceTaskId }.Count(x => x is not null) > 1) return Results.BadRequest("Attach a document to at most one room, fixture, asset or maintenance task.");
+        if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.PropertyId == input.PropertyId)) return Results.BadRequest("The room must be in the selected property.");
+        if (input.FixtureId is not null && !await db.Fixtures.AnyAsync(x => x.Id == input.FixtureId && x.Room != null && x.Room.PropertyId == input.PropertyId)) return Results.BadRequest("The fixture must be in the selected property.");
+        if (input.AssetId is not null && !await db.Assets.AnyAsync(x => x.Id == input.AssetId && x.PropertyId == input.PropertyId)) return Results.BadRequest("The asset must be in the selected property.");
+        if (input.MaintenanceTaskId is not null && !await db.MaintenanceTasks.AnyAsync(x => x.Id == input.MaintenanceTaskId && x.PropertyId == input.PropertyId)) return Results.BadRequest("The maintenance task must be in the selected property.");
+        return null;
+    }
+    static void ApplyDocument(DocumentInput x, Document d)
+    {
+        d.PropertyId = x.PropertyId;
+        d.RoomId = x.RoomId;
+        d.FixtureId = x.FixtureId;
+        d.AssetId = x.AssetId;
+        d.MaintenanceTaskId = x.MaintenanceTaskId;
+        d.Title = x.Title.Trim();
+        d.Kind = x.Kind;
+        d.StorageKey = x.StorageKey.Trim();
+        d.FileName = x.FileName?.Trim();
+        d.ContentType = x.ContentType?.Trim();
+        d.SizeBytes = x.SizeBytes;
+        d.DocumentDate = x.DocumentDate;
+        d.ExpiresOn = x.ExpiresOn;
+        d.Tags = x.Tags?.Trim();
+        d.Notes = x.Notes?.Trim();
+    }
+    static async Task<List<DocumentDto>> DocumentDtos(InventoryDbContext db, IQueryable<Document> documents)
+    {
+        var list = await documents.Include(x => x.Property).Include(x => x.Fixture).Include(x => x.Asset).Include(x => x.MaintenanceTask).ToListAsync();
+        var roomPaths = list.Any(x => x.RoomId is not null) ? await RoomPaths(db) : [];
+        string? AttachedTo(Document x) =>
+            x.RoomId is Guid room ? roomPaths.GetValueOrDefault(room) :
+            x.Fixture is not null ? $"Fixture: {x.Fixture.Name}" :
+            x.Asset is not null ? $"Asset: {x.Asset.Name}" :
+            x.MaintenanceTask is not null ? $"Maintenance: {x.MaintenanceTask.Title}" : null;
+        return list.OrderByDescending(x => x.DocumentDate).ThenBy(x => x.Title)
+            .Select(x => new DocumentDto(x.Id, x.PropertyId, x.RoomId, x.FixtureId, x.AssetId, x.MaintenanceTaskId, x.Title, x.Kind, x.StorageKey, x.FileName, x.ContentType, x.SizeBytes, x.DocumentDate, x.ExpiresOn, x.Tags, x.Notes, x.Property?.Name ?? "", AttachedTo(x)))
+            .ToList();
+    }
     static async Task<Dictionary<Guid, string>> RoomPaths(InventoryDbContext db) =>
         await db.Rooms.Include(x => x.Floor).ThenInclude(x => x!.Property).ToDictionaryAsync(x => x.Id, x => x.Floor is null || x.Floor.Property is null ? x.Name : $"{x.Floor.Property.Name} · {x.Floor.Name} · {x.Name}");
     // Rooms using a paint: explicit library assignments plus painted surfaces whose colour code, or colour name and brand, match.
@@ -923,6 +1088,7 @@ public static class InventoryApi
         var fixturePhotos = await db.FixturePhotos.ToListAsync();
         var tasks = await db.MaintenanceTasks.ToListAsync();
         var records = await db.MaintenanceRecords.ToListAsync();
+        var documents = await db.Documents.ToListAsync();
         // Records keep the backup ID they were imported with, so backup → restore → backup cycles produce the same IDs.
         static string Ext(IHasExternalId x) => x.ExternalId ?? x.Id.ToString();
         var propertyIds = props.ToDictionary(x => x.Id, Ext);
@@ -948,7 +1114,9 @@ public static class InventoryApi
             roomPhotos.Select(x => new ImportRoomPhoto(Ext(x), roomIds[x.RoomId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
             fixturePhotos.Select(x => new ImportFixturePhoto(Ext(x), fixtureIds[x.FixtureId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
             tasks.Select(x => new ImportMaintenanceTask(Ext(x), propertyIds[x.PropertyId], x.FixtureId is Guid fixtureId ? fixtureIds[fixtureId] : null, x.Title, x.IntervalValue, x.IntervalUnit, x.DueOn, x.LastCompletedOn, x.Supplier, x.EstimatedCost, x.Notes)).ToList(),
-            records.Select(x => new ImportMaintenanceRecord(Ext(x), taskIds[x.TaskId], x.CompletedOn, x.Cost, x.Supplier, x.Notes)).ToList());
+            records.Select(x => new ImportMaintenanceRecord(Ext(x), taskIds[x.TaskId], x.CompletedOn, x.Cost, x.Supplier, x.Notes)).ToList(),
+            // Documents attached to an archived asset (not exported) fall back to property level in the backup.
+            documents.Select(x => new ImportDocument(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid r ? roomIds[r] : null, x.FixtureId is Guid f ? fixtureIds[f] : null, x.AssetId is Guid a && assetIds.TryGetValue(a, out var assetExt) ? assetExt : null, x.MaintenanceTaskId is Guid t ? taskIds[t] : null, x.Title, x.Kind, x.StorageKey, x.FileName, x.ContentType, x.SizeBytes, x.DocumentDate, x.ExpiresOn, x.Tags, x.Notes)).ToList());
     }
     // Maps every existing row of one type by its backup ID and its database ID, so imports can recognise records they already hold.
     static async Task<Dictionary<string, Guid>> ExistingIds<T>(IQueryable<T> rows) where T : class, IHasExternalId
@@ -973,10 +1141,11 @@ public static class InventoryApi
         var fixturePhotos = i.FixturePhotos ?? [];
         var tasks = i.MaintenanceTasks ?? [];
         var records = i.MaintenanceRecords ?? [];
+        var documents = i.Documents ?? [];
         var ids = i.Properties.Select(x => x.ExternalId).Concat(i.Floors.Select(x => x.ExternalId)).Concat(i.Rooms.Select(x => x.ExternalId)).Concat(i.Surfaces.Select(x => x.ExternalId))
             .Concat(i.StorageLocations.Select(x => x.ExternalId)).Concat(i.Assets.Select(x => x.ExternalId)).Concat(i.PropertyPhotos.Select(x => x.ExternalId)).Concat(fixtures.Select(x => x.ExternalId))
             .Concat(assetPhotos.Select(x => x.ExternalId)).Concat(paints.Select(x => x.ExternalId)).Concat(roomPaints.Select(x => x.ExternalId)).Concat(roomPhotos.Select(x => x.ExternalId))
-            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).ToList();
+            .Concat(fixturePhotos.Select(x => x.ExternalId)).Concat(tasks.Select(x => x.ExternalId)).Concat(records.Select(x => x.ExternalId)).Concat(documents.Select(x => x.ExternalId)).ToList();
         if (ids.Any(string.IsNullOrWhiteSpace) || ids.Count != ids.Distinct().Count()) errors.Add("Every record needs a unique externalId.");
         var propIds = i.Properties.Select(x => x.ExternalId).ToHashSet();
         var floorIds = i.Floors.Select(x => x.ExternalId).ToHashSet();
@@ -1003,6 +1172,13 @@ public static class InventoryApi
             errors.Add("Maintenance tasks must reference an imported property (and fixture, if any), and service records an imported task.");
         else if (tasks.Any(x => x.FixtureExternalId is not null && fixtureRooms.TryGetValue(x.FixtureExternalId, out var room) && roomFloors.TryGetValue(room, out var floor) && floorProperties.TryGetValue(floor, out var property) && property != x.PropertyExternalId))
             errors.Add("A maintenance task's fixture must be in the task's property.");
+        if (documents.Any(x => string.IsNullOrWhiteSpace(x.Title) || string.IsNullOrWhiteSpace(x.StorageKey) || !Document.Kinds.Contains(x.Kind)))
+            errors.Add($"Documents require a title, a storage key and a kind ({string.Join(", ", Document.Kinds)}).");
+        if (documents.Any(x => !propIds.Contains(x.PropertyExternalId) || x.RoomExternalId is not null && !roomIds.Contains(x.RoomExternalId) || x.FixtureExternalId is not null && !fixtureIds.Contains(x.FixtureExternalId)
+            || x.AssetExternalId is not null && !assetIds.Contains(x.AssetExternalId) || x.MaintenanceTaskExternalId is not null && !taskIds.Contains(x.MaintenanceTaskExternalId)))
+            errors.Add("Documents must reference an imported property and, if attached, an imported room, fixture, asset or maintenance task.");
+        if (documents.Any(x => new[] { x.RoomExternalId, x.FixtureExternalId, x.AssetExternalId, x.MaintenanceTaskExternalId }.Count(y => y is not null) > 1))
+            errors.Add("A document can be attached to at most one room, fixture, asset or maintenance task.");
         if (i.Floors.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Rooms.Any(x => !floorIds.Contains(x.FloorExternalId)) || i.StorageLocations.Any(x => !propIds.Contains(x.PropertyExternalId))
             || i.Assets.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.PropertyPhotos.Any(x => !propIds.Contains(x.PropertyExternalId)) || i.Surfaces.Any(x => !roomIds.Contains(x.RoomExternalId))
             || fixtures.Any(x => !roomIds.Contains(x.RoomExternalId)) || assetPhotos.Any(x => !assetIds.Contains(x.AssetExternalId)) || roomPhotos.Any(x => !roomIds.Contains(x.RoomExternalId))
@@ -1022,9 +1198,10 @@ public static class InventoryApi
             + await CountExisting(db.Paints, paints.Select(x => x.ExternalId)) + await CountExisting(db.PropertyPhotos, i.PropertyPhotos.Select(x => x.ExternalId))
             + await CountExisting(db.AssetPhotos, assetPhotos.Select(x => x.ExternalId)) + await CountExisting(db.RoomPhotos, roomPhotos.Select(x => x.ExternalId))
             + await CountExisting(db.FixturePhotos, fixturePhotos.Select(x => x.ExternalId))
-            + await CountExisting(db.MaintenanceTasks, tasks.Select(x => x.ExternalId)) + await CountExisting(db.MaintenanceRecords, records.Select(x => x.ExternalId));
+            + await CountExisting(db.MaintenanceTasks, tasks.Select(x => x.ExternalId)) + await CountExisting(db.MaintenanceRecords, records.Select(x => x.ExternalId))
+            + await CountExisting(db.Documents, documents.Select(x => x.ExternalId));
         var photoCount = i.PropertyPhotos.Count + assetPhotos.Count + roomPhotos.Count + fixturePhotos.Count;
-        return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount, existingCount, tasks.Count);
+        return new(errors.Count == 0, errors, i.Properties.Count, i.Floors.Count, i.Rooms.Count, i.Surfaces.Count, i.StorageLocations.Count, i.Assets.Count, duplicates, fixtures.Count, paints.Count, photoCount, existingCount, tasks.Count, documents.Count);
     }
     static async Task<int> CountExisting<T>(IQueryable<T> rows, IEnumerable<string> externalIds) where T : class, IHasExternalId
     {

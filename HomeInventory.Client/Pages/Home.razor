@@ -11,6 +11,8 @@ else
         <div class="col-md-4"><div class="card p-3"><div class="text-muted">Active assets</div><strong class="display-6">@dashboard.AssetCount</strong></div></div>
         <div class="col-md-4"><div class="card p-3"><div class="text-muted">Fixtures</div><strong class="display-6">@dashboard.FixtureCount</strong></div></div>
         <div class="col-md-4"><a class="card p-3 text-decoration-none @(dashboard.MaintenanceOverdue > 0 ? "border-danger" : "")" href="maintenance"><div class="text-muted">Maintenance</div><strong class="display-6">@dashboard.MaintenanceOverdue overdue</strong><div class="small text-muted">@dashboard.MaintenanceDueSoon due in the next 30 days</div></a></div>
+        <div class="col-md-4"><a class="card p-3 text-decoration-none @(dashboard.WarrantiesExpiring > 0 ? "border-warning" : "")" href="documents"><div class="text-muted">Warranties</div><strong class="display-6">@dashboard.WarrantiesExpiring expiring</strong><div class="small text-muted">within the next 90 days</div></a></div>
+        <div class="col-md-4"><a class="card p-3 text-decoration-none" href="documents"><div class="text-muted">Receipts</div><strong class="display-6">@dashboard.AssetsMissingReceipts missing</strong><div class="small text-muted">active assets without a receipt or invoice</div></a></div>
         @foreach (var total in dashboard.Totals)
         {
             <div class="col-md-4"><div class="card p-3"><div class="text-muted">Current insured value (@total.Currency)</div><strong class="display-6"><CurrencyDisplay Value="total.TotalValue" CurrencyCode="@total.Currency" /></strong></div></div>
@@ -25,6 +27,6 @@ else
     }
 }
 <h2 class="mt-5">Find anything</h2>
-<div class="input-group"><input class="form-control" @bind="query" @bind:event="oninput" placeholder="Search assets, fixtures, storage, paints or surfaces…" /><button class="btn btn-primary" @onclick="Search">Search</button></div>
+<div class="input-group"><input class="form-control" @bind="query" @bind:event="oninput" placeholder="Search assets, fixtures, storage, paints, surfaces or documents…" /><button class="btn btn-primary" @onclick="Search">Search</button></div>
 @if (results is not null) { <ul class="list-group mt-3">@foreach (var item in results) { <li class="list-group-item"><strong>@item.Title</strong> <span class="text-muted">@item.Kind · @item.Detail @item.LocationPath</span></li> }</ul> }
 @code { DashboardDto? dashboard; string query = ""; List<SearchResultDto>? results; protected override async Task OnInitializedAsync() => dashboard = await Http.GetFromJsonAsync<DashboardDto>("api/dashboard"); async Task Search() => results = string.IsNullOrWhiteSpace(query) ? [] : await Http.GetFromJsonAsync<List<SearchResultDto>>($"api/search?q={Uri.EscapeDataString(query)}"); }

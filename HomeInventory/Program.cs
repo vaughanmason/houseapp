@@ -11,6 +11,7 @@ builder.Services.AddRazorComponents()
 var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HomeInventory");
 Directory.CreateDirectory(dataDirectory);
 builder.Services.AddDbContext<InventoryDbContext>(options => options.UseSqlite($"Data Source={Path.Combine(dataDirectory, "inventory.db")}"));
+builder.Services.AddSingleton(new FileStore(builder.Configuration["Storage:FilesPath"] ?? Path.Combine(dataDirectory, "files")));
 
 var app = builder.Build();
 

@@ -18,6 +18,7 @@ dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQ
 
 - Target framework is `net10.0` (SDK 10.x). CI (`.github/workflows/ci.yml`) runs restore, a Release build with `-warnaserror`, and the tests on every push or PR to `master`.
 - The build is warning-free. Keep it that way.
+- If Windows Application Control / Smart App Control blocks the freshly built `HomeInventory.exe`, run it through the dotnet host instead: from `HomeInventory\`, `$env:ASPNETCORE_ENVIRONMENT="Development"; dotnet bin\Debug\net10.0\HomeInventory.dll --urls http://localhost:5068`.
 - Running the app creates or migrates the real local database at `%LOCALAPPDATA%\HomeInventory\inventory.db`. Tests never touch it.
 
 ## Architecture
@@ -42,10 +43,11 @@ Property (Currency, Photos)
 ├── StorageLocation     (self-referencing tree via ParentId, scoped to one property)
 ├── Asset ── AssetPhoto (optional RoomId XOR StorageLocationId)
 ├── MaintenanceTask ── MaintenanceRecord   (task optionally linked to one of the property's fixtures)
+├── Document            (file + metadata; optionally attached to ONE room, fixture, asset or maintenance task)
 └── PropertyPhoto
 ```
 
-Photos are metadata only (`StorageKey`, `Caption`, `SortOrder`). There is no file upload or storage.
+Photos and documents store a `StorageKey`. Keys matching `yyyy/MM/{guid}.ext` are files uploaded through `FileStore` (`HomeInventory\FileStore.cs`, rooted at `%LOCALAPPDATA%\HomeInventory\files` or `Storage:FilesPath`); anything else is an external path/URL. `FileStore` sniffs the type from the leading bytes (JPEG, PNG, GIF, WebP, HEIC, PDF), caps files at 20 MB, and only serves keys matching that pattern. After deleting anything that removes photos or documents (including cascades from property/floor/room/fixture deletes), call `DeleteUnusedFiles` with the keys gathered beforehand (`FileKeysFor`) so orphaned files are removed only when nothing else references them. On the client, use the shared `PhotoManager` component for photo lists and `PhotoManager.FileUrl(key)` for links.
 
 Every importable entity implements `IHasExternalId` (`Domain.cs`). `OnModelCreating` gives every implementer an indexed `ExternalId` (max 200) in one loop, so a new importable entity only needs the interface (plus a migration).
 

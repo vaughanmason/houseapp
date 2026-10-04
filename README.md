@@ -23,8 +23,10 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Assets with categories, brand/model/serial numbers, valuation, condition, archive toggle, and optional room/storage-location placement
 - Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
 - Maintenance tasks for a property or one of its fixtures/utilities: one-off or repeating every N days/months/years, with service history (date, cost, supplier, notes) and automatic next-due dates
-- Photo metadata registry for external storage references on properties, rooms, fixtures, and assets
-- Dashboard summary metrics, category totals grouped by property currency, and overdue / due-in-30-days maintenance counts
+- Photo uploads (with thumbnails) on properties, rooms, fixtures and assets; links to externally stored files still work
+- Documents (receipts, invoices, manuals, warranties, insurance, certificates, plans) uploaded as images or PDFs, attached to a property, room, fixture, asset or maintenance task, with dates, expiry, tags and notes
+- Uploaded files live in `%LOCALAPPDATA%\HomeInventory\files` (images and PDFs only, 20 MB max, type checked from the file contents)
+- Dashboard summary metrics, category totals grouped by property currency, overdue / due-in-30-days maintenance, warranties expiring within 90 days, and active assets missing a receipt
 - Text search across assets, fixtures, storage locations, paints (with the rooms that use them) and surfaces
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 - **Enhanced UI with multi-page organization** for improved user experience
@@ -40,6 +42,7 @@ The application uses a multi-page, component-based architecture to organize func
 | **Rooms** | Rooms, surfaces and room photos | Complete room metadata (dimensions, finishes, paint details, utilities); add/edit surfaces with type-specific fields (paint for wall/ceiling/trim, product and supplier for flooring); room photos |
 | **Fixtures** | Permanent room fixtures | Fixture lifecycle (purchase, installation, maintenance), financial tracking, photos, warranty info |
 | **Maintenance** | Recurring and one-off jobs | Tasks grouped into Overdue / Due in 30 days / Upcoming / No due date; Mark done (advances the schedule), service history, edit, delete |
+| **Documents** | Receipts, manuals, warranties… | Upload and attach to a property/room/fixture/asset/maintenance task; filter by property, kind and text; expiry badges; open, edit, delete |
 | **Paints** | Paint library and assignments | Global paint registry, assign colours to rooms, "Used in" view listing every room using a paint |
 | **Assets & Storage** | Assets and storage organization | Asset catalog with valuation, Move picker, archive/unarchive with an archived view; nested storage locations with edit/re-parent; photo management |
 
@@ -65,6 +68,8 @@ The application uses a multi-page, component-based architecture to organize func
 | Assets | GET list/filter (`archived=true/false`), POST, PUT, move, archive/unarchive (no hard delete), photo CRUD | Cross-entity validation is enforced for property/floor/room references |
 | Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` | Room-scoped permanent items with type-specific metadata |
 | Maintenance | GET (`propertyId`, `fixtureId` filters), POST, PUT/{id}, DELETE/{id}, POST `/{id}/complete`, GET `/{id}/history` | Task belongs to a property and optionally one of its fixtures; completing sets the next due date from the completion date |
+| Files | POST `/files` (multipart `file`), GET `/files/{key}` | Images (JPEG/PNG/GIF/WebP/HEIC) and PDFs up to 20 MB; returns a storage key for photos and documents |
+| Documents | GET (property/room/fixture/asset/task/kind filters), POST, PUT/{id}, DELETE/{id} | Attached to at most one target in the same property; deleting the target keeps the document at property level |
 | FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
 | AssetPhotos | GET/POST/DELETE under `/assets/{id}/photos` | External photo references for assets |
 
@@ -86,7 +91,8 @@ InventoryExport {
   RoomPhotos[],     // optional
   FixturePhotos[],  // optional
   MaintenanceTasks[],   // optional
-  MaintenanceRecords[]  // optional
+  MaintenanceRecords[], // optional
+  Documents[]           // optional
 }
 
 ImportPreviewDto {
@@ -96,5 +102,7 @@ ImportPreviewDto {
   DuplicateExternalIds[]
 }
 ```
+
+Backups contain document and photo details, not the files themselves: copy `%LOCALAPPDATA%\HomeInventory\files` alongside the JSON to keep them.
 
 All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Every imported record remembers its backup ID, and exports reuse it. Restoring the same backup twice changes nothing, and restoring a newer backup only adds what is new. Storage locations may appear in any order. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.
