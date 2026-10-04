@@ -15,6 +15,9 @@ public sealed record AssetDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? Stor
 public sealed record AssetEventDto(Guid Id, Guid AssetId, DateOnly OccurredOn, string Kind, string? Description, decimal? Cost);
 public sealed record AssetPhotoDto(Guid Id, string StorageKey, string? Caption, int SortOrder);
 public sealed record DashboardDto(int AssetCount, int FixtureCount, IReadOnlyList<CurrencyTotalDto> Totals, int MaintenanceOverdue = 0, int MaintenanceDueSoon = 0, int WarrantiesExpiring = 0, int AssetsMissingReceipts = 0);
+public sealed record InsuranceReportDto(DateOnly GeneratedOn, IReadOnlyList<InsurancePropertyDto> Properties);
+public sealed record InsurancePropertyDto(Guid Id, string Name, string? Address, string Currency, decimal AssetTotal, decimal FixtureTotal, IReadOnlyList<CategoryTotalDto> Categories, IReadOnlyList<InsuranceItemDto> Items);
+public sealed record InsuranceItemDto(string Kind, string Name, string Category, string? BrandModel, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Location, int PhotoCount, bool HasReceipt);
 public sealed record UploadedFileDto(string StorageKey, string FileName, string ContentType, long SizeBytes);
 public sealed record DocumentDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? FixtureId, Guid? AssetId, Guid? MaintenanceTaskId, string Title, string Kind, string StorageKey, string? FileName, string? ContentType, long? SizeBytes, DateOnly? DocumentDate, DateOnly? ExpiresOn, string? Tags, string? Notes, string PropertyName, string? AttachedTo);
 public sealed record MaintenanceTaskDto(Guid Id, Guid PropertyId, Guid? FixtureId, string Title, int? IntervalValue, string? IntervalUnit, DateOnly? DueOn, DateOnly? LastCompletedOn, string? Supplier, decimal? EstimatedCost, string? Notes, string PropertyName, string? FixtureName, string Currency);

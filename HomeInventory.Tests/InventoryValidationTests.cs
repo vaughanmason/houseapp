@@ -708,7 +708,7 @@ public sealed class InventoryValidationTests
             zipBytes = await response.Content.ReadAsByteArrayAsync();
         }
         using (var zip = new System.IO.Compression.ZipArchive(new MemoryStream(zipBytes)))
-            Assert.Equal(["files/" + manual.StorageKey, "files/" + photo.StorageKey, "inventory.json"], zip.Entries.Select(x => x.FullName).Order());
+            Assert.Equal(new[] { "files/" + manual.StorageKey, "files/" + photo.StorageKey, "inventory.json" }.Order(), zip.Entries.Select(x => x.FullName).Order());
 
         using var targetFactory = new CustomWebApplicationFactory();
         using var target = CreateClient(targetFactory);
@@ -823,6 +823,38 @@ public sealed class InventoryValidationTests
         var restored = (await target.GetFromJsonAsync<List<AssetEventDto>>($"/api/assets/{restoredTv.Id}/history"))!;
         Assert.Equal(5, restored.Count);
         Assert.Equal(1200m, Assert.Single(restored, x => x.Kind == "Repaired").Cost);
+    }
+
+    [Fact]
+    public async Task InsuranceReport_ValuesActiveItemsPerPropertyInItsCurrency()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var home = (await (await client.PostAsJsonAsync("/api/properties", new PropertyInput("Home", "1 Main Rd", null, null, null, null, "ZAR"))).Content.ReadFromJsonAsync<PropertyDto>())!;
+        var flat = (await (await client.PostAsJsonAsync("/api/properties", new PropertyInput("Flat", null, null, null, null, null, "EUR"))).Content.ReadFromJsonAsync<PropertyDto>())!;
+        var room = await CreateRoomAsync(client, (await CreateFloorAsync(client, home.Id)).Id);
+        var tv = (await (await client.PostAsJsonAsync("/api/assets", new AssetInput(home.Id, room.Id, null, "TV", "Electronics", null, "Samsung", "QE55", "SN1", new DateOnly(2024, 1, 1), 15000m, 12000m, null, null))).Content.ReadFromJsonAsync<AssetDto>())!;
+        var oldTv = await CreateAssetAsync(client, home.Id, null, null, "Old TV");
+        await client.PostAsync($"/api/assets/{oldTv.Id}/archive", null);
+        await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id) with { CurrentValue = 3000m });
+        await client.PostAsJsonAsync("/api/assets", new AssetInput(flat.Id, null, null, "Sofa", "Furniture", null, null, null, null, null, null, 800m, null, null));
+        var receipt = await UploadAsync(client, PdfBytes, "tv.pdf");
+        await client.PostAsJsonAsync("/api/documents", new DocumentInput(home.Id, null, null, tv.Id, null, "TV receipt", "Receipt", receipt.StorageKey, null, null, null, null, null, null, null));
+        await client.PostAsJsonAsync($"/api/assets/{tv.Id}/photos", new AssetPhotoInput("tv.jpg", null, 0));
+
+        var report = (await client.GetFromJsonAsync<InsuranceReportDto>("/api/reports/insurance"))!;
+
+        Assert.Equal(["Flat", "Home"], report.Properties.Select(x => x.Name));
+        var homeReport = report.Properties.Single(x => x.Name == "Home");
+        Assert.Equal(("ZAR", 12000m, 3000m), (homeReport.Currency, homeReport.AssetTotal, homeReport.FixtureTotal));
+        Assert.Equal(2, homeReport.Items.Count); // archived Old TV is excluded
+        var tvItem = Assert.Single(homeReport.Items, x => x.Kind == "Asset");
+        Assert.Equal(("Samsung QE55", "SN1", 1, true), (tvItem.BrandModel, tvItem.SerialNumber, tvItem.PhotoCount, tvItem.HasReceipt));
+        Assert.False(Assert.Single(homeReport.Items, x => x.Kind == "Fixture").HasReceipt);
+        Assert.Equal(("EUR", 800m), (report.Properties.Single(x => x.Name == "Flat").Currency, report.Properties.Single(x => x.Name == "Flat").AssetTotal));
+
+        Assert.Equal("Flat", Assert.Single((await client.GetFromJsonAsync<InsuranceReportDto>($"/api/reports/insurance?propertyId={flat.Id}"))!.Properties).Name);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/reports/insurance?propertyId={Guid.NewGuid()}")).StatusCode);
     }
 
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)

@@ -732,6 +732,35 @@ public static class InventoryApi
             await DeleteUnusedFiles(db, store, [entity.StorageKey]);
             return Results.NoContent();
         });
+        // Insurance schedule: active assets and fixtures per property, valued in that property's currency.
+        api.MapGet("/reports/insurance", async (Guid? propertyId, InventoryDbContext db) =>
+        {
+            var properties = await db.Properties.Where(x => propertyId == null || x.Id == propertyId).OrderBy(x => x.Name).ToListAsync();
+            if (propertyId is not null && properties.Count == 0) return Results.NotFound();
+            var ids = properties.Select(x => x.Id).ToList();
+            var assets = await AssetDtos(db, propertyId, false);
+            var fixtures = await FixtureDtos(db, db.Fixtures.Where(x => x.Room != null && ids.Contains(x.Room.PropertyId)));
+            var fixtureProperties = await db.Fixtures.Where(x => x.Room != null && ids.Contains(x.Room.PropertyId)).Select(x => new { x.Id, x.Room!.PropertyId }).ToDictionaryAsync(x => x.Id, x => x.PropertyId);
+            var assetPhotos = await db.AssetPhotos.GroupBy(x => x.AssetId).Select(x => new { x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+            var fixturePhotos = await db.FixturePhotos.GroupBy(x => x.FixtureId).Select(x => new { x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+            var receipts = await db.Documents.Where(x => x.Kind == "Receipt" || x.Kind == "Invoice").Select(x => new { x.AssetId, x.FixtureId }).ToListAsync();
+            var assetReceipts = receipts.Where(x => x.AssetId != null).Select(x => x.AssetId!.Value).ToHashSet();
+            var fixtureReceipts = receipts.Where(x => x.FixtureId != null).Select(x => x.FixtureId!.Value).ToHashSet();
+            static string? BrandModel(string? brand, string? model) => string.IsNullOrWhiteSpace($"{brand}{model}") ? null : $"{brand} {model}".Trim();
+
+            var report = properties.Select(property =>
+            {
+                var items = assets.Where(x => x.PropertyId == property.Id)
+                    .Select(x => new InsuranceItemDto("Asset", x.Name, x.Category, BrandModel(x.Brand, x.Model), x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.LocationPath, assetPhotos.GetValueOrDefault(x.Id), assetReceipts.Contains(x.Id)))
+                    .Concat(fixtures.Where(x => fixtureProperties.GetValueOrDefault(x.Id) == property.Id)
+                        .Select(x => new InsuranceItemDto("Fixture", x.Name, x.Type, BrandModel(x.Manufacturer, x.Model), x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.LocationPath, fixturePhotos.GetValueOrDefault(x.Id), fixtureReceipts.Contains(x.Id))))
+                    .OrderBy(x => x.Kind).ThenBy(x => x.Category).ThenByDescending(x => x.CurrentValue).ToList();
+                var categories = items.GroupBy(x => x.Category).Select(x => new CategoryTotalDto(x.Key, x.Sum(y => y.CurrentValue ?? 0))).OrderByDescending(x => x.Total).ToList();
+                return new InsurancePropertyDto(property.Id, property.Name, property.Address, NormalizeCurrency(property.Currency) ?? "USD",
+                    items.Where(x => x.Kind == "Asset").Sum(x => x.CurrentValue ?? 0), items.Where(x => x.Kind == "Fixture").Sum(x => x.CurrentValue ?? 0), categories, items);
+            }).ToList();
+            return Results.Ok(new InsuranceReportDto(Today(), report));
+        });
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {
             // TODO: Include recent purchases and room completion metrics.

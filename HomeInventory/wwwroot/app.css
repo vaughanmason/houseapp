@@ -58,3 +58,35 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+/* Printable pages (insurance report, QR labels): hide the app chrome and anything marked no-print. */
+.print-only {
+    display: none;
+}
+
+@media print {
+    .sidebar, .top-row, .no-print, #blazor-error-ui {
+        display: none !important;
+    }
+
+    .print-only {
+        display: block;
+    }
+
+    .page, main, article.content {
+        display: block !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .report-property {
+        break-inside: avoid-page;
+    }
+
+    .report-table {
+        font-size: 0.8rem;
+    }
+
+    a[href]::after {
+        content: none !important;
+    }
+}

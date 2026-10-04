@@ -1,0 +1,113 @@
+@page "/reports/insurance"
+@inject HttpClient Http
+@inject IJSRuntime Js
+
+<PageTitle>Insurance report</PageTitle>
+
+<div class="d-flex justify-content-between align-items-start mb-3 no-print">
+    <div>
+        <h1>Insurance report</h1>
+        <p class="lead mb-0">A schedule of everything you own, valued per property. Print it or save it as a PDF.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <select class="form-select" @bind="propertyId" @bind:after="LoadAsync">
+            <option value="">All properties</option>
+            @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+        </select>
+        <button class="btn btn-primary text-nowrap" @onclick="PrintAsync" disabled="@(report is null)">Print / Save as PDF</button>
+    </div>
+</div>
+
+@if (report is null)
+{
+    <p>Loading…</p>
+}
+else if (report.Properties.Count == 0)
+{
+    <div class="alert alert-info">No properties yet. <a href="properties">Create a property first</a>.</div>
+}
+else
+{
+    <div class="print-only mb-3">
+        <h1 class="h3">Home inventory – insurance schedule</h1>
+    </div>
+    <p class="small text-muted">Generated @report.GeneratedOn.ToString("d MMMM yyyy"). Values are current values as recorded; items without a value count as zero.</p>
+
+    @foreach (var property in report.Properties)
+    {
+        <section class="mb-5 report-property">
+            <h2 class="h4 mb-1">@property.Name</h2>
+            @if (!string.IsNullOrEmpty(property.Address)) { <div class="text-muted mb-2">@property.Address</div> }
+
+            <div class="row g-3 mb-3">
+                <div class="col-sm-4"><div class="border rounded p-2"><div class="small text-muted">Contents (assets)</div><strong><CurrencyDisplay Value="property.AssetTotal" CurrencyCode="@property.Currency" /></strong></div></div>
+                <div class="col-sm-4"><div class="border rounded p-2"><div class="small text-muted">Fixtures</div><strong><CurrencyDisplay Value="property.FixtureTotal" CurrencyCode="@property.Currency" /></strong></div></div>
+                <div class="col-sm-4"><div class="border rounded p-2"><div class="small text-muted">Total</div><strong><CurrencyDisplay Value="property.AssetTotal + property.FixtureTotal" CurrencyCode="@property.Currency" /></strong></div></div>
+            </div>
+
+            @if (property.Items.Count == 0)
+            {
+                <p class="text-muted">No assets or fixtures recorded.</p>
+            }
+            else
+            {
+                <h3 class="h6">By category</h3>
+                <table class="table table-sm w-auto mb-3">
+                    <tbody>
+                        @foreach (var category in property.Categories)
+                        {
+                            <tr><td class="pe-4">@category.Category</td><td class="text-end"><CurrencyDisplay Value="category.Total" CurrencyCode="@property.Currency" /></td></tr>
+                        }
+                    </tbody>
+                </table>
+
+                <h3 class="h6">Items</h3>
+                <table class="table table-sm table-striped report-table">
+                    <thead>
+                        <tr>
+                            <th>Item</th><th>Category</th><th>Make / model</th><th>Serial</th><th>Location</th><th>Purchased</th>
+                            <th class="text-end">Price</th><th class="text-end">Value</th><th class="text-center">Photos</th><th class="text-center">Receipt</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in property.Items)
+                        {
+                            <tr>
+                                <td>@item.Name @if (item.Kind == "Fixture") { <span class="badge text-bg-light">fixture</span> }</td>
+                                <td>@item.Category</td>
+                                <td>@item.BrandModel</td>
+                                <td>@item.SerialNumber</td>
+                                <td>@item.Location</td>
+                                <td>@item.PurchaseDate?.ToString("yyyy-MM-dd")</td>
+                                <td class="text-end"><CurrencyDisplay Value="item.PurchasePrice" CurrencyCode="@property.Currency" /></td>
+                                <td class="text-end"><CurrencyDisplay Value="item.CurrentValue" CurrencyCode="@property.Currency" /></td>
+                                <td class="text-center">@item.PhotoCount</td>
+                                <td class="text-center">@(item.HasReceipt ? "✓" : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (property.Items.Any(x => !x.HasReceipt))
+                {
+                    <p class="small text-muted">@property.Items.Count(x => !x.HasReceipt) item(s) have no receipt or invoice on file. Add them on the <a href="documents">Documents</a> page.</p>
+                }
+            }
+        </section>
+    }
+}
+
+@code {
+    List<PropertyDto> properties = [];
+    InsuranceReportDto? report;
+    string propertyId = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        await LoadAsync();
+    }
+
+    async Task LoadAsync() => report = await Http.GetFromJsonAsync<InsuranceReportDto>(propertyId == "" ? "api/reports/insurance" : $"api/reports/insurance?propertyId={propertyId}");
+
+    async Task PrintAsync() => await Js.InvokeVoidAsync("print");
+}
