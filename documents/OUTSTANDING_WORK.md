@@ -13,7 +13,10 @@ This started as a code review of commit `3d4bb42` and has tracked the work since
 | **Thumbnails and HEIC display** | Full-size images are scaled in the browser, and iPhone HEIC photos are stored but most browsers can't show them. Fixing both needs an image library (e.g. SkiaSharp, MIT, or ImageSharp, split licence). |
 | **Restore merging** | Import skips records that already exist (by backup ID), so an older backup can never overwrite newer data, but edits in a backup can't flow into existing records either. Merge rules (newest wins? ask per record?) are a product decision. |
 | **Barcode scanning** | Assets have a `Barcode` field (searchable). Scanning with a camera needs a choice of device and library. |
-| **Stack direction** | The original plan suggests Flutter with offline-first cloud sync. The app is Blazor WebAssembly, local-only. Settle this before any multi-device work. |
+
+## Decided
+
+- **Stack (2026-10-04):** stay on Blazor WebAssembly with the ASP.NET Core minimal-API host and SQLite. The Flutter/offline-first suggestion in the original plan is not being pursued. Phone and multi-device access will come through network access to this app (see above), not a separate client.
 
 ## Known limitations
 

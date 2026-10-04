@@ -522,6 +522,7 @@ Hallway
 ⸻  
   
 ## Suggested Tech Stack  
+Decision (2026-10-04): the app stays on Blazor WebAssembly with an ASP.NET Core minimal-API host and SQLite. The Flutter frontend below was the original suggestion and is not being pursued.
 ## Frontend  
 * Flutter (Android, iOS, Windows, macOS, Linux, Web)  
 * Material 3  

@@ -23,6 +23,8 @@ dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQ
 
 ## Architecture
 
+- Stack decision (2026-10-04): stay on Blazor WebAssembly with the ASP.NET Core host and SQLite. Don't introduce Flutter, MAUI or a separate client. Multi-device access is planned through network access to this app.
+
 - `HomeInventory` is the ASP.NET Core host. `Program.cs` registers SQLite, runs `Database.MigrateAsync()` on startup, serves the Blazor WebAssembly client through `Components/App.razor`, and calls `app.MapInventoryApi()`. `public partial class Program;` exists so `WebApplicationFactory<Program>` can be used in tests.
 - `HomeInventory\Domain.cs` holds every EF entity plus `InventoryDbContext` (constraints and relationships live in `OnModelCreating`).
 - `HomeInventory\InventoryApi.cs` is the **entire** `/api` surface: one consolidated minimal-API module with static `ToDto`/`*Dtos` helpers at the bottom. Keep that style; don't introduce controllers, services or MediatR.
