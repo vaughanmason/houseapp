@@ -475,14 +475,6 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.Ok((await AssetDtos(db, input.PropertyId, entity.IsArchived)).Single(x => x.Id == id));
         });
-        api.MapDelete("/assets/{id:guid}", async (Guid id, InventoryDbContext db) =>
-        {
-            var entity = await db.Assets.FindAsync(id);
-            if (entity is null) return Results.NotFound();
-            db.Assets.Remove(entity);
-            await db.SaveChangesAsync();
-            return Results.NoContent();
-        });
         api.MapPost("/assets/{id:guid}/move", async (Guid id, AssetMoveInput input, InventoryDbContext db) =>
         {
             var entity = await db.Assets.FindAsync(id);
@@ -500,6 +492,14 @@ public static class InventoryApi
             var entity = await db.Assets.FindAsync(id);
             if (entity is null) return Results.NotFound();
             entity.IsArchived = true;
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+        api.MapPost("/assets/{id:guid}/unarchive", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.Assets.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            entity.IsArchived = false;
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
@@ -529,15 +529,20 @@ public static class InventoryApi
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {
             // TODO: Include due maintenance, expiring warranties, missing receipts, recent purchases, and room completion metrics.
-            var assets = db.Assets.Where(x => !x.IsArchived);
-            var fixtures = db.Fixtures;
-            var assetCategories = (await assets.GroupBy(x => x.Category).Select(x => new { Category = x.Key, Total = x.Sum(a => a.CurrentValue ?? 0) }).OrderByDescending(x => x.Total).ToListAsync())
-                .Select(x => new CategoryTotalDto(x.Category, x.Total)).ToList();
-            var fixtureCategories = (await fixtures.GroupBy(x => x.Type).Select(x => new { Category = x.Key, Total = x.Sum(a => a.CurrentValue ?? 0) }).OrderByDescending(x => x.Total).ToListAsync())
-                .Select(x => new CategoryTotalDto(x.Category, x.Total)).ToList();
-            var combinedCategories = assetCategories.Concat(fixtureCategories).GroupBy(x => x.Category).Select(x => new CategoryTotalDto(x.Key, x.Sum(y => y.Total))).OrderByDescending(x => x.Total).ToList();
-            var currency = await db.Properties.OrderBy(x => x.Name).Select(x => x.Currency).FirstOrDefaultAsync();
-            return new DashboardDto(await assets.CountAsync(), combinedCategories.Sum(x => x.Total), combinedCategories, await fixtures.CountAsync(), await fixtures.SumAsync(x => x.CurrentValue ?? 0), currency ?? "USD");
+            // Values are only summed within one currency; properties with different currencies get separate totals.
+            var assets = await db.Assets.Where(x => !x.IsArchived).Select(x => new { x.Category, Value = x.CurrentValue ?? 0, Currency = x.Property!.Currency }).ToListAsync();
+            var fixtures = await db.Fixtures.Select(x => new { Category = x.Type, Value = x.CurrentValue ?? 0, Currency = x.Room!.Floor!.Property!.Currency }).ToListAsync();
+            var totals = assets.Select(x => (x.Currency, x.Category, x.Value, IsFixture: false))
+                .Concat(fixtures.Select(x => (x.Currency, x.Category, x.Value, IsFixture: true)))
+                .GroupBy(x => NormalizeCurrency(x.Currency) ?? "USD")
+                .OrderByDescending(x => x.Sum(y => y.Value))
+                .Select(x => new CurrencyTotalDto(
+                    x.Key,
+                    x.Sum(y => y.Value),
+                    x.Where(y => y.IsFixture).Sum(y => y.Value),
+                    x.GroupBy(y => y.Category).Select(y => new CategoryTotalDto(y.Key, y.Sum(z => z.Value))).OrderByDescending(y => y.Total).ToList()))
+                .ToList();
+            return new DashboardDto(assets.Count, fixtures.Count, totals);
         });
         api.MapGet("/search", async (string? q, InventoryDbContext db) =>
         {

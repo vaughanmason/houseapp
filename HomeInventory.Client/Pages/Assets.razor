@@ -59,14 +59,20 @@
     </div>
 
     <div class="col-lg-7">
-        <h2 class="h4">Assets</h2>
+        <div class="d-flex justify-content-between align-items-center">
+            <h2 class="h4">@(showArchived ? "Archived assets" : "Assets")</h2>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="showArchived" @bind="showArchived" @bind:after="ReloadAssets" />
+                <label class="form-check-label" for="showArchived">Show archived</label>
+            </div>
+        </div>
         @if (properties.Count == 0)
         {
             <div class="alert alert-info">No properties found. <a href="properties">Create a property first</a>.</div>
         }
         else if (assets.Count == 0)
         {
-            <div class="alert alert-info">No assets yet. Add one to the left.</div>
+            <div class="alert alert-info">@(showArchived ? "No archived assets." : "No assets yet. Add one to the left.")</div>
         }
         else
         {
@@ -101,8 +107,14 @@
                             </div>
                             <div>
                                 <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(asset)">Edit</button>
-                                <button class="btn btn-sm btn-outline-warning me-1" @onclick="() => ArchiveAsset(asset.Id)">Archive</button>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsset(asset.Id)">Delete</button>
+                                @if (asset.IsArchived)
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => SetArchived(asset.Id, false)">Unarchive</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-warning" @onclick="() => SetArchived(asset.Id, true)">Archive</button>
+                                }
                             </div>
                         </div>
                     </li>
@@ -222,6 +234,7 @@
     string storagePropertyId = "", newStorageParentId = "", newStorageName = "", newStorageType = "";
     string photoAssetId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
     string searchQuery = "";
+    bool showArchived;
 
     Guid? editingAssetId;
     string? error;
@@ -232,8 +245,10 @@
         floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
         locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
-        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+        await ReloadAssets();
     }
+
+    async Task ReloadAssets() => assets = await Http.GetFromJsonAsync<List<AssetDto>>($"api/assets?archived={showArchived.ToString().ToLowerInvariant()}") ?? [];
 
     void StartEdit(AssetDto asset)
     {
@@ -314,23 +329,15 @@
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingAssetId = null;
         ClearForm();
-        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+        await ReloadAssets();
     }
 
-    async Task DeleteAsset(Guid assetId)
+    async Task SetArchived(Guid assetId, bool archived)
     {
         error = null;
-        var response = await Http.DeleteAsync($"api/assets/{assetId}");
+        var response = await Http.PostAsync($"api/assets/{assetId}/{(archived ? "archive" : "unarchive")}", null);
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
-    }
-
-    async Task ArchiveAsset(Guid assetId)
-    {
-        error = null;
-        var response = await Http.PostAsync($"api/assets/{assetId}/archive", null);
-        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        assets = await Http.GetFromJsonAsync<List<AssetDto>>("api/assets?archived=false") ?? [];
+        await ReloadAssets();
     }
 
     async Task AddStorageLocation()

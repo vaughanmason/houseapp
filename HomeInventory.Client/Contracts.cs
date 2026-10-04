@@ -12,7 +12,8 @@ public sealed record RoomPaintDto(Guid PaintId, string Brand, string ColorName, 
 public sealed record StorageLocationDto(Guid Id, Guid PropertyId, Guid? ParentId, string Name, string? Type, string Path);
 public sealed record AssetDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? StorageLocationId, string Name, string Category, string? Description, string? Brand, string? Model, string? SerialNumber, DateOnly? PurchaseDate, decimal? PurchasePrice, decimal? CurrentValue, string? Condition, string? Notes, bool IsArchived, string? LocationPath);
 public sealed record AssetPhotoDto(Guid Id, string StorageKey, string? Caption, int SortOrder);
-public sealed record DashboardDto(int AssetCount, decimal TotalValue, IReadOnlyList<CategoryTotalDto> Categories, int FixtureCount, decimal FixtureValue, string? Currency = null);
+public sealed record DashboardDto(int AssetCount, int FixtureCount, IReadOnlyList<CurrencyTotalDto> Totals);
+public sealed record CurrencyTotalDto(string Currency, decimal TotalValue, decimal FixtureValue, IReadOnlyList<CategoryTotalDto> Categories);
 public sealed record CategoryTotalDto(string Category, decimal Total);
 public sealed record SearchResultDto(string Kind, Guid Id, string Title, string Detail, string? LocationPath);
 

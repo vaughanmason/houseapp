@@ -205,6 +205,52 @@ public sealed class InventoryValidationTests
         Assert.Single(paints);
     }
 
+    [Fact]
+    public async Task Assets_ArchiveAndUnarchive_NoHardDelete()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var asset = await CreateAssetAsync(client, property.Id, null, null, "Couch");
+
+        Assert.False((await client.DeleteAsync($"/api/assets/{asset.Id}")).IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/assets/{asset.Id}/archive", null)).StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<List<AssetDto>>("/api/assets?archived=false"))!);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/assets/{asset.Id}/unarchive", null)).StatusCode);
+        var active = await client.GetFromJsonAsync<List<AssetDto>>("/api/assets?archived=false");
+        Assert.NotNull(active);
+        Assert.False(Assert.Single(active).IsArchived);
+    }
+
+    [Fact]
+    public async Task Dashboard_TotalsEachCurrencySeparately()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var euroHome = await (await client.PostAsJsonAsync("/api/properties", new PropertyInput("Paris flat", null, null, null, null, null, "EUR"))).Content.ReadFromJsonAsync<PropertyDto>();
+        var randHome = await (await client.PostAsJsonAsync("/api/properties", new PropertyInput("Cape Town house", null, null, null, null, null, "ZAR"))).Content.ReadFromJsonAsync<PropertyDto>();
+        Assert.NotNull(euroHome);
+        Assert.NotNull(randHome);
+        await client.PostAsJsonAsync("/api/assets", new AssetInput(euroHome.Id, null, null, "TV", "Electronics", null, null, null, null, null, null, 800m, null, null));
+        await client.PostAsJsonAsync("/api/assets", new AssetInput(randHome.Id, null, null, "Sofa", "Furniture", null, null, null, null, null, null, 15000m, null, null));
+        var floor = await CreateFloorAsync(client, randHome.Id);
+        var room = await CreateRoomAsync(client, floor.Id);
+        await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", FixtureFor(room.Id) with { CurrentValue = 2000m });
+
+        var dashboard = await client.GetFromJsonAsync<DashboardDto>("/api/dashboard");
+
+        Assert.NotNull(dashboard);
+        Assert.Equal(2, dashboard.AssetCount);
+        Assert.Equal(1, dashboard.FixtureCount);
+        var zar = Assert.Single(dashboard.Totals, x => x.Currency == "ZAR");
+        Assert.Equal(17000m, zar.TotalValue);
+        Assert.Equal(2000m, zar.FixtureValue);
+        var eur = Assert.Single(dashboard.Totals, x => x.Currency == "EUR");
+        Assert.Equal(800m, eur.TotalValue);
+        Assert.Equal("Electronics", Assert.Single(eur.Categories).Category);
+    }
+
     private static FixtureInput FixtureFor(Guid roomId) =>
         new(roomId, "Sink", "Sink", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
