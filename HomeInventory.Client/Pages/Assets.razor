@@ -105,8 +105,9 @@
                                     </div>
                                 }
                             </div>
-                            <div>
+                            <div class="text-nowrap">
                                 <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEdit(asset)">Edit</button>
+                                @if (!asset.IsArchived) { <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => StartMove(asset)">Move</button> }
                                 @if (asset.IsArchived)
                                 {
                                     <button class="btn btn-sm btn-outline-success" @onclick="() => SetArchived(asset.Id, false)">Unarchive</button>
@@ -117,6 +118,22 @@
                                 }
                             </div>
                         </div>
+                        @if (movingAssetId == asset.Id)
+                        {
+                            <div class="d-flex gap-2 mt-2">
+                                <select class="form-select form-select-sm" @bind="moveTarget">
+                                    <option value="">No room or storage location</option>
+                                    <optgroup label="Rooms">
+                                        @foreach (var room in RoomsForProperty(asset.PropertyId)) { <option value="room:@room.Id">@room.Name</option> }
+                                    </optgroup>
+                                    <optgroup label="Storage">
+                                        @foreach (var location in locations.Where(l => l.PropertyId == asset.PropertyId).OrderBy(l => l.Path)) { <option value="location:@location.Id">@location.Path</option> }
+                                    </optgroup>
+                                </select>
+                                <button class="btn btn-sm btn-primary" @onclick="() => MoveAsset(asset.Id)">Move</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => movingAssetId = null">Cancel</button>
+                            </div>
+                        }
                     </li>
                 }
             </ul>
@@ -129,8 +146,8 @@
 <div class="row g-4">
     <div class="col-lg-6">
         <div class="card card-body">
-            <h2 class="h4">Storage Locations</h2>
-            <select class="form-select mb-2" @bind="storagePropertyId">
+            <h2 class="h4">@(editingLocationId is null ? "Add storage location" : "Edit storage location")</h2>
+            <select class="form-select mb-2" @bind="storagePropertyId" @bind:after="() => newStorageParentId = string.Empty">
                 <option value="">Choose property</option>
                 @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
             </select>
@@ -138,11 +155,14 @@
             {
                 <select class="form-select mb-2" @bind="newStorageParentId">
                     <option value="">Top level (no parent)</option>
-                    @foreach (var location in locations.Where(l => l.PropertyId.ToString() == storagePropertyId).OrderBy(l => l.Path)) { <option value="@location.Id">@location.Path</option> }
+                    @foreach (var location in ParentOptions()) { <option value="@location.Id">@location.Path</option> }
                 </select>
                 <input class="form-control mb-2" @bind="newStorageName" placeholder="Location name" />
                 <input class="form-control mb-2" @bind="newStorageType" placeholder="Type (e.g. Shelf, Box, Drawer)" />
-                <button class="btn btn-outline-primary" @onclick="AddStorageLocation">Add location</button>
+                <div>
+                    <button class="btn btn-outline-primary" @onclick="SaveStorageLocation">@(editingLocationId is null ? "Add location" : "Update location")</button>
+                    @if (editingLocationId is not null) { <button class="btn btn-outline-secondary ms-2" @onclick="ClearStorageForm">Cancel</button> }
+                </div>
             }
         </div>
     </div>
@@ -163,11 +183,15 @@
                         @foreach (var location in locations.Where(l => l.PropertyId == prop.Id).OrderBy(l => l.Path))
                         {
                             <li class="list-group-item d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <strong>@location.Path</strong>
-                                        </div>
-                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStorageLocation(location.Id)">Delete</button>
-                                    </li>
+                                <div>
+                                    <strong>@location.Path</strong>
+                                    @if (!string.IsNullOrEmpty(location.Type)) { <span class="text-muted"> · @location.Type</span> }
+                                </div>
+                                <div class="text-nowrap">
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditLocation(location)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStorageLocation(location.Id)">Delete</button>
+                                </div>
+                            </li>
                         }
                     </ul>
                 </div>
@@ -235,6 +259,8 @@
     string photoAssetId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
     string searchQuery = "";
     bool showArchived;
+    Guid? editingLocationId, movingAssetId;
+    string moveTarget = "";
 
     Guid? editingAssetId;
     string? error;
@@ -284,12 +310,7 @@
 
     async Task RefreshLocationsAndRooms() => StateHasChanged();
 
-    List<RoomDto> GetRoomsForProperty()
-    {
-        if (!Guid.TryParse(propertyId, out var propId)) return [];
-        var floorIds = floors.Where(f => f.PropertyId == propId).Select(f => f.Id).ToList();
-        return rooms.Where(r => floorIds.Contains(r.FloorId)).ToList();
-    }
+    List<RoomDto> GetRoomsForProperty() => Guid.TryParse(propertyId, out var propId) ? RoomsForProperty(propId) : [];
 
     List<StorageLocationDto> GetLocationsForProperty()
     {
@@ -340,16 +361,76 @@
         await ReloadAssets();
     }
 
-    async Task AddStorageLocation()
+    void StartEditLocation(StorageLocationDto location)
+    {
+        editingLocationId = location.Id;
+        storagePropertyId = location.PropertyId.ToString();
+        newStorageParentId = location.ParentId?.ToString() ?? "";
+        newStorageName = location.Name;
+        newStorageType = location.Type ?? "";
+    }
+
+    void ClearStorageForm()
+    {
+        editingLocationId = null;
+        newStorageParentId = newStorageName = newStorageType = "";
+    }
+
+    // A location can't be moved under itself or any of its descendants.
+    IEnumerable<StorageLocationDto> ParentOptions()
+    {
+        var excluded = new HashSet<Guid>();
+        if (editingLocationId is Guid id)
+        {
+            excluded.Add(id);
+            bool added;
+            do
+            {
+                added = false;
+                foreach (var child in locations.Where(l => l.ParentId is Guid parent && excluded.Contains(parent) && !excluded.Contains(l.Id)))
+                    added |= excluded.Add(child.Id);
+            } while (added);
+        }
+        return locations.Where(l => l.PropertyId.ToString() == storagePropertyId && !excluded.Contains(l.Id)).OrderBy(l => l.Path);
+    }
+
+    async Task SaveStorageLocation()
     {
         error = null;
         if (!Guid.TryParse(storagePropertyId, out var propId)) { error = "Choose a property first."; return; }
         if (string.IsNullOrWhiteSpace(newStorageName)) { error = "Location name is required."; return; }
         var parentId = Guid.TryParse(newStorageParentId, out var pid) ? (Guid?)pid : null;
-        var response = await Http.PostAsJsonAsync("api/locations", new StorageLocationInput(propId, parentId, newStorageName, newStorageType));
+        var input = new StorageLocationInput(propId, parentId, newStorageName, newStorageType);
+        var response = editingLocationId is null
+            ? await Http.PostAsJsonAsync("api/locations", input)
+            : await Http.PutAsJsonAsync($"api/locations/{editingLocationId}", input);
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        newStorageParentId = newStorageName = newStorageType = "";
+        ClearStorageForm();
         locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
+        await ReloadAssets();
+    }
+
+    void StartMove(AssetDto asset)
+    {
+        movingAssetId = asset.Id;
+        moveTarget = asset.RoomId is Guid room ? $"room:{room}" : asset.StorageLocationId is Guid location ? $"location:{location}" : "";
+    }
+
+    async Task MoveAsset(Guid assetId)
+    {
+        error = null;
+        Guid? roomTarget = moveTarget.StartsWith("room:") ? Guid.Parse(moveTarget[5..]) : null;
+        Guid? locationTarget = moveTarget.StartsWith("location:") ? Guid.Parse(moveTarget[9..]) : null;
+        var response = await Http.PostAsJsonAsync($"api/assets/{assetId}/move", new AssetMoveInput(roomTarget, locationTarget));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        movingAssetId = null;
+        await ReloadAssets();
+    }
+
+    List<RoomDto> RoomsForProperty(Guid propertyId)
+    {
+        var floorIds = floors.Where(f => f.PropertyId == propertyId).Select(f => f.Id).ToHashSet();
+        return rooms.Where(r => floorIds.Contains(r.FloorId)).OrderBy(r => r.Name).ToList();
     }
 
     async Task DeleteStorageLocation(Guid locationId)
@@ -357,6 +438,7 @@
         error = null;
         var response = await Http.DeleteAsync($"api/locations/{locationId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        if (editingLocationId == locationId) ClearStorageForm();
         locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
     }
 

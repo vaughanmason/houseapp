@@ -39,6 +39,7 @@
             <input class="form-control mb-2" @bind="roomFlooring" placeholder="Flooring" />
             <input class="form-control mb-2" @bind="roomWallFinish" placeholder="Wall finish" />
             <input class="form-control mb-2" @bind="roomCeilingFinish" placeholder="Ceiling finish" />
+            <input class="form-control mb-2" @bind="roomPaintDetails" placeholder="Paint details" />
 
             <h5 class="mt-3">Details</h5>
             <div class="row g-2 mb-2">
@@ -110,45 +111,131 @@
 
 <hr class="my-4" />
 
-<div class="row g-4">
-    <div class="col-12">
-        <div class="card card-body">
-            <h2 class="h4">Surfaces</h2>
-            <select class="form-select mb-2" @bind="roomSurfaceId" @bind:after="LoadSurfaces">
-                <option value="">Choose room</option>
-                @foreach (var room in rooms.OrderBy(r => r.Name)) { <option value="@room.Id">@room.Name</option> }
-            </select>
-            @if (!string.IsNullOrEmpty(roomSurfaceId))
-            {
+<div class="mb-3">
+    <h2 class="h4">Room details</h2>
+    <select class="form-select" @bind="selectedRoomId" @bind:after="LoadRoomDetails">
+        <option value="">Choose room</option>
+        @foreach (var room in rooms.OrderBy(r => RoomLabel(r))) { <option value="@room.Id">@RoomLabel(room)</option> }
+    </select>
+</div>
+
+@if (!string.IsNullOrEmpty(selectedRoomId))
+{
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <div class="card card-body">
+                <h3 class="h5">@(editingSurfaceId is null ? "Add surface" : "Edit surface")</h3>
                 <div class="row g-2 mb-2">
-                    <div class="col-md-6"><input class="form-control" @bind="surfaceName" placeholder="Surface name" /></div>
-                    <div class="col-md-6"><input class="form-control" @bind="surfaceType" placeholder="Type (wall, ceiling, flooring, trim)" /></div>
+                    <div class="col-md-7"><input class="form-control" @bind="surfaceName" placeholder="Surface name (e.g. North wall)" /></div>
+                    <div class="col-md-5">
+                        <select class="form-select" @bind="surfaceType">
+                            @foreach (var type in SurfaceTypes) { <option value="@type">@type</option> }
+                        </select>
+                    </div>
                 </div>
-                <div class="row g-2 mb-2">
-                    <div class="col-md-6"><input class="form-control" @bind="surfaceSortOrder" type="number" placeholder="Sort order" /></div>
-                    <div class="col-md-6"><input class="form-control" @bind="surfaceNotes" placeholder="Notes" /></div>
-                </div>
-                <button class="btn btn-outline-primary mb-3" @onclick="AddSurface">Add surface</button>
-                @if (surfaces.Count > 0)
+                @if (surfaceType == "flooring")
                 {
-                    <ul class="list-group">
-                        @foreach (var surface in surfaces.OrderBy(s => s.SortOrder))
-                        {
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span><strong>@surface.Name</strong> <span class="text-muted">@surface.SurfaceType</span></span>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurface(surface.Id)">Delete</button>
-                            </li>
-                        }
-                    </ul>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceMaterial" placeholder="Material (tile, vinyl, oak...)" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceColorName" placeholder="Colour" /></div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceManufacturer" placeholder="Manufacturer" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceProductName" placeholder="Product name" /></div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceSupplier" placeholder="Supplier" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceInstallationDate" type="date" title="Installation date" /></div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceWarranty" placeholder="Warranty" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceInvoice" placeholder="Invoice reference" /></div>
+                    </div>
                 }
                 else
                 {
-                    <div class="alert alert-info">No surfaces yet.</div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6"><input class="form-control" @bind="surfacePaintBrand" placeholder="Paint brand" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceColorName" placeholder="Colour name" /></div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceColorCode" placeholder="Colour code" /></div>
+                        <div class="col-md-6"><input class="form-control" @bind="surfaceFinish" placeholder="Finish (e.g. eggshell)" /></div>
+                    </div>
+                    @if (surfaceType != "trim")
+                    {
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-4"><input class="form-control" @bind="surfaceCoats" type="number" placeholder="Coats" /></div>
+                            <div class="col-md-4"><input class="form-control" @bind="surfaceQuantity" type="number" step="0.1" placeholder="Litres bought" /></div>
+                            <div class="col-md-4"><input class="form-control" @bind="surfacePaintedDate" type="date" title="Date painted" /></div>
+                        </div>
+                        <input class="form-control mb-2" @bind="surfacePainter" placeholder="Painter" />
+                    }
                 }
+                <div class="row g-2 mb-2">
+                    <div class="col-md-3"><input class="form-control" @bind="surfaceSortOrder" type="number" title="Sort order" placeholder="Order" /></div>
+                    <div class="col-md-9"><input class="form-control" @bind="surfaceNotes" placeholder="Notes" /></div>
+                </div>
+                <div>
+                    <button class="btn btn-primary" @onclick="SaveSurface">@(editingSurfaceId is null ? "Add surface" : "Update surface")</button>
+                    @if (editingSurfaceId is not null) { <button class="btn btn-outline-secondary ms-2" @onclick="ClearSurfaceForm">Cancel</button> }
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <h3 class="h5">Surfaces</h3>
+            @if (surfaces.Count == 0)
+            {
+                <div class="alert alert-info">No surfaces yet.</div>
+            }
+            else
+            {
+                <ul class="list-group">
+                    @foreach (var surface in surfaces.OrderBy(s => s.SortOrder).ThenBy(s => s.Name))
+                    {
+                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>@surface.Name</strong> <span class="badge text-bg-light">@surface.SurfaceType</span>
+                                <div class="small text-muted">@SurfaceSummary(surface)</div>
+                                @if (!string.IsNullOrEmpty(surface.Notes)) { <div class="small text-muted">@surface.Notes</div> }
+                            </div>
+                            <div class="text-nowrap">
+                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditSurface(surface)">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSurface(surface.Id)">Delete</button>
+                            </div>
+                        </li>
+                    }
+                </ul>
             }
         </div>
     </div>
-</div>
+
+    <div class="card card-body mt-4">
+        <h3 class="h5">Room photos</h3>
+        <div class="row g-2 mb-2">
+            <div class="col-md-6"><input class="form-control" @bind="photoStorageKey" placeholder="Storage key or file path" /></div>
+            <div class="col-md-4"><input class="form-control" @bind="photoCaption" placeholder="Caption" /></div>
+            <div class="col-md-2"><input class="form-control" @bind="photoSortOrder" type="number" title="Sort order" placeholder="Order" /></div>
+        </div>
+        <div><button class="btn btn-outline-primary mb-3" @onclick="AddPhoto">Add photo</button></div>
+        @if (photos.Count == 0)
+        {
+            <div class="alert alert-info">No photos yet.</div>
+        }
+        else
+        {
+            <ul class="list-group">
+                @foreach (var photo in photos.OrderBy(p => p.SortOrder))
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><strong>@photo.Caption</strong> <span class="text-muted">@photo.StorageKey</span></span>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePhoto(photo.Id)">Delete</button>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
 
 @if (error is not null)
 {
@@ -162,9 +249,16 @@
     List<SurfaceDto> surfaces = [];
 
     string floorId = "", roomName = "", roomType = "", roomArea = "", roomVolume = "", roomCeilingHeight = "", roomLength = "", roomWidth = "", roomHeight = "";
-    string roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomWindowsCount = "", roomDoorsCount = "";
+    string roomFlooring = "", roomWallFinish = "", roomCeilingFinish = "", roomPaintDetails = "", roomWindowsCount = "", roomDoorsCount = "";
     string roomFixturesNotes = "", roomUtilitiesNotes = "", roomNotes = "";
-    string roomSurfaceId = "", surfaceName = "", surfaceType = "", surfaceSortOrder = "0", surfaceNotes = "";
+    static readonly string[] SurfaceTypes = ["wall", "ceiling", "flooring", "trim"];
+    List<PhotoMetadataDto> photos = [];
+    string selectedRoomId = "", surfaceName = "", surfaceType = "wall", surfaceSortOrder = "0", surfaceNotes = "";
+    string surfacePaintBrand = "", surfaceColorName = "", surfaceColorCode = "", surfaceFinish = "", surfaceCoats = "", surfacePainter = "", surfaceQuantity = "";
+    DateOnly? surfacePaintedDate, surfaceInstallationDate;
+    string surfaceManufacturer = "", surfaceProductName = "", surfaceMaterial = "", surfaceSupplier = "", surfaceWarranty = "", surfaceInvoice = "";
+    string photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
+    Guid? editingSurfaceId;
     
     Guid? editingRoomId;
     string? error;
@@ -192,6 +286,7 @@
         roomFlooring = room.Flooring ?? "";
         roomWallFinish = room.WallFinish ?? "";
         roomCeilingFinish = room.CeilingFinish ?? "";
+        roomPaintDetails = room.PaintDetails ?? "";
         roomWindowsCount = room.WindowsCount?.ToString() ?? "";
         roomDoorsCount = room.DoorsCount?.ToString() ?? "";
         roomFixturesNotes = room.FixturesNotes ?? "";
@@ -208,7 +303,7 @@
     void ClearForm()
     {
         floorId = roomName = roomType = roomArea = roomVolume = roomCeilingHeight = roomLength = roomWidth = roomHeight = "";
-        roomFlooring = roomWallFinish = roomCeilingFinish = roomWindowsCount = roomDoorsCount = "";
+        roomFlooring = roomWallFinish = roomCeilingFinish = roomPaintDetails = roomWindowsCount = roomDoorsCount = "";
         roomFixturesNotes = roomUtilitiesNotes = roomNotes = "";
     }
 
@@ -219,8 +314,8 @@
         if (string.IsNullOrWhiteSpace(roomName)) { error = "Room name is required."; return; }
 
         var response = editingRoomId is null
-            ? await Http.PostAsJsonAsync("api/rooms", new RoomInput(parsedFloorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes))
-            : await Http.PutAsJsonAsync($"api/rooms/{editingRoomId}", new RoomInput(parsedFloorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, null, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
+            ? await Http.PostAsJsonAsync("api/rooms", new RoomInput(parsedFloorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, roomPaintDetails, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes))
+            : await Http.PutAsJsonAsync($"api/rooms/{editingRoomId}", new RoomInput(parsedFloorId, roomName, roomType, TryDecimal(roomArea), TryDecimal(roomVolume), TryDecimal(roomCeilingHeight), TryDecimal(roomLength), TryDecimal(roomWidth), TryDecimal(roomHeight), roomFlooring, roomWallFinish, roomCeilingFinish, roomPaintDetails, TryInt(roomWindowsCount), TryInt(roomDoorsCount), roomFixturesNotes, roomUtilitiesNotes, roomNotes));
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingRoomId = null;
@@ -236,23 +331,71 @@
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];
     }
 
-    async Task LoadSurfaces()
+    async Task LoadRoomDetails()
     {
         surfaces = [];
-        if (!Guid.TryParse(roomSurfaceId, out var roomId)) return;
+        photos = [];
+        ClearSurfaceForm();
+        if (!Guid.TryParse(selectedRoomId, out var roomId)) return;
         surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
+        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/rooms/{roomId}/photos") ?? [];
     }
 
-    async Task AddSurface()
+    void StartEditSurface(SurfaceDto surface)
+    {
+        editingSurfaceId = surface.Id;
+        surfaceName = surface.Name;
+        surfaceType = SurfaceTypes.Contains(surface.SurfaceType) ? surface.SurfaceType : "wall";
+        surfacePaintBrand = surface.PaintBrand ?? "";
+        surfaceColorName = surface.ColorName ?? "";
+        surfaceColorCode = surface.ColorCode ?? "";
+        surfaceFinish = surface.Finish ?? "";
+        surfaceCoats = surface.Coats?.ToString() ?? "";
+        surfacePaintedDate = surface.PaintedDate;
+        surfacePainter = surface.Painter ?? "";
+        surfaceQuantity = surface.QuantityPurchased?.ToString() ?? "";
+        surfaceManufacturer = surface.Manufacturer ?? "";
+        surfaceProductName = surface.ProductName ?? "";
+        surfaceMaterial = surface.Material ?? "";
+        surfaceSupplier = surface.Supplier ?? "";
+        surfaceWarranty = surface.Warranty ?? "";
+        surfaceInvoice = surface.Invoice ?? "";
+        surfaceInstallationDate = surface.InstallationDate;
+        surfaceNotes = surface.Notes ?? "";
+        surfaceSortOrder = surface.SortOrder.ToString();
+    }
+
+    void ClearSurfaceForm()
+    {
+        editingSurfaceId = null;
+        surfaceType = "wall";
+        surfaceName = surfacePaintBrand = surfaceColorName = surfaceColorCode = surfaceFinish = surfaceCoats = surfacePainter = surfaceQuantity = "";
+        surfacePaintedDate = surfaceInstallationDate = null;
+        surfaceManufacturer = surfaceProductName = surfaceMaterial = surfaceSupplier = surfaceWarranty = surfaceInvoice = surfaceNotes = "";
+        surfaceSortOrder = "0";
+    }
+
+    async Task SaveSurface()
     {
         error = null;
-        if (!Guid.TryParse(roomSurfaceId, out var roomId)) { error = "Choose a room first."; return; }
+        if (!Guid.TryParse(selectedRoomId, out var roomId)) { error = "Choose a room first."; return; }
         if (string.IsNullOrWhiteSpace(surfaceName)) { error = "Surface name is required."; return; }
-        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/surfaces", new SurfaceInput(roomId, surfaceName, string.IsNullOrWhiteSpace(surfaceType) ? "wall" : surfaceType, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, surfaceNotes, TryInt(surfaceSortOrder) ?? 0));
+        // Only send the fields that belong to the selected type so switching type doesn't leave stale values behind.
+        var flooring = surfaceType == "flooring";
+        var paintedArea = surfaceType is "wall" or "ceiling";
+        var input = new SurfaceInput(roomId, surfaceName, surfaceType,
+            flooring ? null : surfacePaintBrand, surfaceColorName, flooring ? null : surfaceColorCode, flooring ? null : surfaceFinish,
+            paintedArea ? TryInt(surfaceCoats) : null, paintedArea ? surfacePaintedDate : null,
+            paintedArea ? surfacePainter : null, paintedArea ? TryDecimal(surfaceQuantity) : null,
+            flooring ? surfaceManufacturer : null, flooring ? surfaceProductName : null, flooring ? surfaceMaterial : null, flooring ? surfaceSupplier : null,
+            flooring ? surfaceWarranty : null, flooring ? surfaceInvoice : null, flooring ? surfaceInstallationDate : null,
+            surfaceNotes, TryInt(surfaceSortOrder) ?? 0);
+        var response = editingSurfaceId is null
+            ? await Http.PostAsJsonAsync($"api/rooms/{roomId}/surfaces", input)
+            : await Http.PutAsJsonAsync($"api/surfaces/{editingSurfaceId}", input);
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        surfaceName = surfaceType = surfaceNotes = "";
-        surfaceSortOrder = "0";
-        await LoadSurfaces();
+        ClearSurfaceForm();
+        surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{roomId}/surfaces") ?? [];
     }
 
     async Task DeleteSurface(Guid surfaceId)
@@ -260,11 +403,50 @@
         error = null;
         var response = await Http.DeleteAsync($"api/surfaces/{surfaceId}");
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        await LoadSurfaces();
+        if (editingSurfaceId == surfaceId) ClearSurfaceForm();
+        surfaces = await Http.GetFromJsonAsync<List<SurfaceDto>>($"api/rooms/{selectedRoomId}/surfaces") ?? [];
     }
 
+    async Task AddPhoto()
+    {
+        error = null;
+        if (!Guid.TryParse(selectedRoomId, out var roomId)) { error = "Choose a room first."; return; }
+        if (string.IsNullOrWhiteSpace(photoStorageKey)) { error = "Storage key is required."; return; }
+        var response = await Http.PostAsJsonAsync($"api/rooms/{roomId}/photos", new PhotoMetadataInput(photoStorageKey, photoCaption, TryInt(photoSortOrder) ?? 0));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        photoStorageKey = photoCaption = "";
+        photoSortOrder = "0";
+        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/rooms/{roomId}/photos") ?? [];
+    }
+
+    async Task DeletePhoto(Guid photoId)
+    {
+        error = null;
+        var response = await Http.DeleteAsync($"api/rooms/{selectedRoomId}/photos/{photoId}");
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        photos = await Http.GetFromJsonAsync<List<PhotoMetadataDto>>($"api/rooms/{selectedRoomId}/photos") ?? [];
+    }
+
+    string RoomLabel(RoomDto room)
+    {
+        var floor = floors.FirstOrDefault(f => f.Id == room.FloorId);
+        var property = floor is null ? null : properties.FirstOrDefault(p => p.Id == floor.PropertyId);
+        return floor is null ? room.Name : $"{property?.Name} · {floor.Name} · {room.Name}";
+    }
+
+    static string SurfaceSummary(SurfaceDto s) => string.Join(" · ", new[]
+    {
+        s.SurfaceType == "flooring" ? s.Material : s.PaintBrand,
+        s.SurfaceType == "flooring" ? s.ProductName : null,
+        string.Join(" ", new[] { s.ColorName, s.ColorCode is null ? null : $"({s.ColorCode})" }.Where(x => !string.IsNullOrWhiteSpace(x))),
+        s.Finish,
+        s.Coats is null ? null : $"{s.Coats} coats",
+        s.PaintedDate is null ? null : $"painted {s.PaintedDate:yyyy-MM-dd}",
+        s.InstallationDate is null ? null : $"installed {s.InstallationDate:yyyy-MM-dd}",
+        s.Supplier,
+    }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
     static string FormatNumber(decimal? number) => number?.ToString("0.00") ?? "-";
-    static DateTime? TryDate(string? value) => DateTime.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
     static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
     static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
     static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
