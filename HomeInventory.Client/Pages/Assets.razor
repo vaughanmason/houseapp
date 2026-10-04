@@ -124,8 +124,12 @@
             </select>
             @if (!string.IsNullOrEmpty(storagePropertyId))
             {
+                <select class="form-select mb-2" @bind="newStorageParentId">
+                    <option value="">Top level (no parent)</option>
+                    @foreach (var location in locations.Where(l => l.PropertyId.ToString() == storagePropertyId).OrderBy(l => l.Path)) { <option value="@location.Id">@location.Path</option> }
+                </select>
                 <input class="form-control mb-2" @bind="newStorageName" placeholder="Location name" />
-                <input class="form-control mb-2" @bind="newStorageNotes" placeholder="Notes" />
+                <input class="form-control mb-2" @bind="newStorageType" placeholder="Type (e.g. Shelf, Box, Drawer)" />
                 <button class="btn btn-outline-primary" @onclick="AddStorageLocation">Add location</button>
             }
         </div>
@@ -215,7 +219,7 @@
     string propertyId = "", roomId = "", storageLocationId = "", assetName = "", assetCategory = "", assetDescription = "";
     string assetBrand = "", assetModel = "", assetSerialNumber = "", assetPurchaseDate = "";
     string assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "";
-    string storagePropertyId = "", newStorageName = "", newStorageNotes = "";
+    string storagePropertyId = "", newStorageParentId = "", newStorageName = "", newStorageType = "";
     string photoAssetId = "", photoStorageKey = "", photoCaption = "", photoSortOrder = "0";
     string searchQuery = "";
 
@@ -334,9 +338,10 @@
         error = null;
         if (!Guid.TryParse(storagePropertyId, out var propId)) { error = "Choose a property first."; return; }
         if (string.IsNullOrWhiteSpace(newStorageName)) { error = "Location name is required."; return; }
-        var response = await Http.PostAsJsonAsync($"api/properties/{propId}/locations", new StorageLocationInput(propId, null, newStorageName, newStorageNotes));
+        var parentId = Guid.TryParse(newStorageParentId, out var pid) ? (Guid?)pid : null;
+        var response = await Http.PostAsJsonAsync("api/locations", new StorageLocationInput(propId, parentId, newStorageName, newStorageType));
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
-        newStorageName = newStorageNotes = "";
+        newStorageParentId = newStorageName = newStorageType = "";
         locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
     }
 

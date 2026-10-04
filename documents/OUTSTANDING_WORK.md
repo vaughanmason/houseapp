@@ -1,6 +1,6 @@
 # Outstanding Work
 
-_Last reviewed: 2026-10-04 (commit `3d4bb42`)._
+_Last reviewed: 2026-10-04 (commit `3d4bb42`). Bugs 1–6 fixed on branch `fix/outstanding-p1-bugs`; see [Fixed](#fixed)._
 
 Findings from a full code review of `HomeInventory`, `HomeInventory.Client` and `HomeInventory.Tests`, compared against the [product plan](Home%20Inventory%20%26%20Property%20Management%20App%20%E2%80%93%20Detailed%20Plan.md). The two UI bugs marked ✅ were confirmed against the running app (see [RUN_CHECK.md](RUN_CHECK.md)).
 
@@ -8,22 +8,30 @@ Findings from a full code review of `HomeInventory`, `HomeInventory.Client` and 
 
 | # | Area | Problem | Where |
 |---|------|---------|-------|
-| 1 | Storage UI ✅ | "Add storage location" POSTs to `api/properties/{id}/locations`, which doesn't exist. The server only has `POST /api/locations`, so the request falls through to the Razor endpoint and returns **400**. Storage locations can't be created from the UI. | [Assets.razor:337](../HomeInventory.Client/Pages/Assets.razor#L337) |
-| 2 | Storage UI/API ✅ | The UI calls `DELETE api/locations/{id}`, but no delete endpoint exists, so it returns **405**. The endpoint should refuse to delete a location that has children or assets (both FKs are `Restrict`). | [Assets.razor:346](../HomeInventory.Client/Pages/Assets.razor#L346), [InventoryApi.cs:422-437](../HomeInventory/InventoryApi.cs#L422-L437) |
-| 3 | Floor/room delete | Floor → Room cascades, but `Asset.RoomId` is `Restrict`. Deleting a floor or room that holds assets throws an unhandled FK exception (500). The endpoint should check first and return `BadRequest` (or unassign the assets). | [InventoryApi.cs:67-74](../HomeInventory/InventoryApi.cs#L67-L74), [146-153](../HomeInventory/InventoryApi.cs#L146-L153), [Domain.cs:272,283](../HomeInventory/Domain.cs#L272) |
-| 4 | Fixture update | `PUT /fixtures/{id}` assigns `input.RoomId` without checking that the room exists, which causes an FK 500. | [InventoryApi.cs:279](../HomeInventory/InventoryApi.cs#L279) |
-| 5 | Storage tree | `PUT /locations/{id}` only rejects `ParentId == id`. Deeper cycles (A→B→A) make the recursive `Path()` overflow the stack and take down every location, asset and search request. Changing `PropertyId` on a location with children leaves the children in the old property. | [InventoryApi.cs:435](../HomeInventory/InventoryApi.cs#L435), [641](../HomeInventory/InventoryApi.cs#L641) |
-| 6 | Import confirm | Asset photos whose asset is in `SkipExternalIds` throw `KeyNotFoundException` (`assets[photo.AssetExternalId]`). Importing a backup that has a duplicate asset with photos fails. | [InventoryApi.cs:604](../HomeInventory/InventoryApi.cs#L604) |
 | 7 | Backup fidelity | Export/import leaves out **paints, room-paint assignments, room photos and fixture photos**, so a backup + restore loses data. Needs optional collections added to `InventoryExport` plus `Export`/`Preview`/confirm support. | [Contracts.cs:33](../HomeInventory.Client/Contracts.cs#L33), [InventoryApi.cs:645](../HomeInventory/InventoryApi.cs#L645) |
 | 8 | Archive convention | The Assets page has a hard **Delete** button (`DELETE /api/assets/{id}`), which goes against the archive-only rule. There is no unarchive endpoint and no UI for viewing archived assets. | [Assets.razor:316](../HomeInventory.Client/Pages/Assets.razor#L316), [InventoryApi.cs:459-486](../HomeInventory/InventoryApi.cs#L459-L486) |
 | 9 | Dashboard currency | Values from every property are summed regardless of currency and labelled with the alphabetically first property's currency. It should group totals by currency or filter by property. | [InventoryApi.cs:510-522](../HomeInventory/InventoryApi.cs#L510-L522) |
 | 10 | Import duplicates | Preview flags duplicates by name + location path, not external ID. Re-importing the same backup into a different location tree won't be detected, and two different assets with the same name in the same place are wrongly skipped. The behavior and the docs should agree. | [InventoryApi.cs:646](../HomeInventory/InventoryApi.cs#L646) |
 
+| 11 | Schema drift | `Rooms.FloorId` has **no database FK** (it was added as a plain column by a hand-written migration), so Floor → Room cascade exists only in the EF model. `DELETE /floors/{id}` now loads the rooms so EF deletes them, but any other delete path would orphan rooms. `Rooms.PropertyId` is `NOT NULL` + FK in the DB but nullable in the model. Fix with a table-rebuild migration once a model snapshot exists. | [20260805120000_AddFloorsAndSurfaces.cs](../HomeInventory/Migrations/20260805120000_AddFloorsAndSurfaces.cs), [Domain.cs:34-35](../HomeInventory/Domain.cs#L34-L35) |
+
+## Fixed
+
+| # | Fix | Test |
+|---|-----|------|
+| 1 | Assets page POSTs to `api/locations`. Also added a parent-location picker, and the "Notes" box is now labelled "Type" to match the field it saves. | `StorageLocations_CreateNested_ComputesPathAndDeletesLeafFirst` |
+| 2 | Added `DELETE /api/locations/{id}`. It rejects locations that still have sub-locations or assets. | same, plus `StorageLocation_Delete_WithAsset_ReturnsBadRequest` |
+| 3 | Floor and room deletes return 400 while assets are still placed in them (archived assets included, since the FK applies to them too). Floor delete now cascades its rooms through EF (see #11). | `DeleteRoomAndFloor_WithAssets_ReturnsBadRequestUntilAssetsMoved` |
+| 4 | `PUT /fixtures/{id}` checks that the room exists. | `UpdateFixture_WithUnknownRoom_ReturnsBadRequest` |
+| 5 | `PUT /locations/{id}` rejects moving a location under one of its own descendants, and rejects a property change while it still has children or assets. | `StorageLocation_Update_RejectsCycle`, `StorageLocation_Update_RejectsPropertyChangeWithChildren` |
+| 6 | Import confirm skips asset photos that belong to skipped duplicate assets. | `ImportConfirm_SkippedDuplicateAssetWithPhotos_Succeeds` |
+| – | API 404s were being re-executed through the `/not-found` Razor page, so `DELETE`/`PUT` 404s came back as 405. Status-code pages now apply to non-`/api` paths only. | covered by the location delete test |
+
 ## P2 – Functional gaps in the existing modules
 
 - **Properties**: no `DELETE /api/properties/{id}`.
 - **Rooms**: the surface edit endpoint exists (`PUT /surfaces/{id}`) but the Rooms page only supports add/delete. The room photo endpoints exist but have no UI.
-- **Storage**: the UI can only create top-level locations. There is no parent picker and no rename/move in the UI.
+- **Storage**: the UI can create nested locations but has no rename or move.
 - **Assets**: the move endpoint (`POST /assets/{id}/move`) isn't used by the UI. The search box on the page only filters on the client.
 - **Import page**: the help text lists only `properties, rooms, storageLocations, assets, propertyPhotos` and is missing floors, surfaces, fixtures and assetPhotos. Preview counts don't include fixtures or photos.
 - **Paints**: no "which rooms use this paint" view (plan: *Search "Blue Paint"*). Search doesn't cover paints or surfaces.
@@ -62,8 +70,8 @@ Findings from a full code review of `HomeInventory`, `HomeInventory.Client` and 
 
 ## Suggested order
 
-1. Fix bugs 1–2 (the storage UI is unusable) and 5 (stack overflow risk), each with tests.
-2. Fix bugs 3, 4 and 6 (unhandled 500s), each with tests.
+1. ~~Fix bugs 1–6~~ (done).
+2. Fix the schema drift (#11): generate a model snapshot, then a rebuild migration that adds the `Rooms.FloorId` FK.
 3. Bring backups to full fidelity (7) and decide on duplicate semantics (10).
 4. Archive vs. delete in the UI (8) and the dashboard currency (9).
 5. Tidy up: remove template pages, stale TODO and warning, and add CI running `dotnet build` + `dotnet test`.

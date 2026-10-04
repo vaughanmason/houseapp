@@ -66,8 +66,11 @@ public static class InventoryApi
         });
         api.MapDelete("/floors/{id:guid}", async (Guid id, InventoryDbContext db) =>
         {
-            var entity = await db.Floors.FindAsync(id);
+            // Rooms.FloorId has no database FK (added by a hand-written migration), so load rooms to let EF cascade the delete.
+            var entity = await db.Floors.Include(x => x.Rooms).SingleOrDefaultAsync(x => x.Id == id);
             if (entity is null) return Results.NotFound();
+            var assetCount = await db.Assets.CountAsync(x => x.Room != null && x.Room.FloorId == id);
+            if (assetCount > 0) return Results.BadRequest($"This floor still has {assetCount} asset(s) in its rooms. Move them before deleting the floor.");
             db.Floors.Remove(entity);
             await db.SaveChangesAsync();
             return Results.NoContent();
@@ -147,6 +150,8 @@ public static class InventoryApi
         {
             var entity = await db.Rooms.FindAsync(id);
             if (entity is null) return Results.NotFound();
+            var assetCount = await db.Assets.CountAsync(x => x.RoomId == id);
+            if (assetCount > 0) return Results.BadRequest($"This room still holds {assetCount} asset(s). Move them before deleting the room.");
             db.Rooms.Remove(entity);
             await db.SaveChangesAsync();
             return Results.NoContent();
@@ -276,6 +281,7 @@ public static class InventoryApi
             if (entity is null) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Type))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Name is required."], ["type"] = ["Type is required."] });
+            if (!await db.Rooms.AnyAsync(x => x.Id == input.RoomId)) return Results.BadRequest("The selected room does not exist.");
             entity.RoomId = input.RoomId;
             entity.Name = input.Name.Trim();
             entity.Type = input.Type.Trim();
@@ -433,7 +439,20 @@ public static class InventoryApi
             var entity=await db.StorageLocations.FindAsync(id); if(entity is null)return Results.NotFound();
             if(string.IsNullOrWhiteSpace(input.Name) || !await db.Properties.AnyAsync(x=>x.Id==input.PropertyId)) return Results.BadRequest("A valid property and location name are required.");
             if(input.ParentId==id || input.ParentId is not null && !await db.StorageLocations.AnyAsync(x=>x.Id==input.ParentId && x.PropertyId==input.PropertyId)) return Results.BadRequest("Choose a different parent location in the selected property.");
+            if(input.ParentId is not null && await IsDescendant(db, input.ParentId.Value, id)) return Results.BadRequest("A location cannot be moved inside one of its own sub-locations.");
+            if(input.PropertyId!=entity.PropertyId && (await db.StorageLocations.AnyAsync(x=>x.ParentId==id) || await db.Assets.AnyAsync(x=>x.StorageLocationId==id))) return Results.BadRequest("Move this location's sub-locations and assets before changing its property.");
             entity.PropertyId=input.PropertyId;entity.ParentId=input.ParentId;entity.Name=input.Name.Trim();entity.Type=input.Type?.Trim();await db.SaveChangesAsync();return Results.Ok((await LocationDtos(db,input.PropertyId)).Single(x=>x.Id==id));
+        });
+        api.MapDelete("/locations/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var entity = await db.StorageLocations.FindAsync(id);
+            if (entity is null) return Results.NotFound();
+            if (await db.StorageLocations.AnyAsync(x => x.ParentId == id)) return Results.BadRequest("Delete or move this location's sub-locations first.");
+            var assetCount = await db.Assets.CountAsync(x => x.StorageLocationId == id);
+            if (assetCount > 0) return Results.BadRequest($"This location still holds {assetCount} asset(s). Move them before deleting the location.");
+            db.StorageLocations.Remove(entity);
+            await db.SaveChangesAsync();
+            return Results.NoContent();
         });
 
         api.MapGet("/assets", async (Guid? propertyId, bool archived, InventoryDbContext db) => await AssetDtos(db, propertyId, archived));
@@ -601,7 +620,7 @@ public static class InventoryApi
                 db.Assets.Add(entity);
                 assets[asset.ExternalId] = entity.Id;
             }
-            foreach (var photo in confirmation.Inventory.AssetPhotos ?? []) db.AssetPhotos.Add(new AssetPhoto { AssetId = assets[photo.AssetExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
+            foreach (var photo in (confirmation.Inventory.AssetPhotos ?? []).Where(x => assets.ContainsKey(x.AssetExternalId))) db.AssetPhotos.Add(new AssetPhoto { AssetId = assets[photo.AssetExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
             return Results.NoContent();
@@ -638,6 +657,14 @@ public static class InventoryApi
         return list.Select(x => ToDto(x, rooms.TryGetValue(x.RoomId, out var path) ? path : null)).ToList();
     }
     static async Task<List<AssetDto>> AssetDtos(InventoryDbContext db, Guid? propertyId, bool archived) { var locations = await LocationDtos(db, propertyId); var roomNames = await db.Rooms.Where(x => propertyId == null || x.Floor != null && x.Floor.PropertyId == propertyId).ToDictionaryAsync(x => x.Id, x => x.Name); var list = await db.Assets.Where(x => (propertyId == null || x.PropertyId == propertyId) && x.IsArchived == archived).ToListAsync(); return list.OrderBy(x => x.Name).Select(x => new AssetDto(x.Id,x.PropertyId,x.RoomId,x.StorageLocationId,x.Name,x.Category,x.Description,x.Brand,x.Model,x.SerialNumber,x.PurchaseDate,x.PurchasePrice,x.CurrentValue,x.Condition,x.Notes,x.IsArchived,x.StorageLocationId is not null ? locations.SingleOrDefault(l => l.Id == x.StorageLocationId)?.Path : x.RoomId is not null && roomNames.TryGetValue(x.RoomId.Value, out var n) ? n : null)).ToList(); }
+    static async Task<bool> IsDescendant(InventoryDbContext db, Guid candidateId, Guid ancestorId)
+    {
+        var parents = await db.StorageLocations.ToDictionaryAsync(x => x.Id, x => x.ParentId);
+        var visited = new HashSet<Guid>();
+        for (Guid? current = candidateId; current is not null && visited.Add(current.Value); current = parents.GetValueOrDefault(current.Value))
+            if (current == ancestorId) return true;
+        return false;
+    }
     static string Path(StorageLocation item, List<StorageLocation> all) => item.ParentId is null ? item.Name : $"{Path(all.Single(x => x.Id == item.ParentId), all)} → {item.Name}";
     static async Task<string?> ValidateAsset(AssetInput input, InventoryDbContext db) { if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Category)) return "Asset name and category are required."; if (!await db.Properties.AnyAsync(x => x.Id == input.PropertyId)) return "The selected property does not exist."; if (input.RoomId is not null && input.StorageLocationId is not null) return "Choose either a room or a storage location, not both."; if (input.RoomId is not null && !await db.Rooms.AnyAsync(x => x.Id == input.RoomId && x.Floor != null && x.Floor.PropertyId == input.PropertyId)) return "Room must be in the selected property."; if (input.StorageLocationId is not null && !await db.StorageLocations.AnyAsync(x => x.Id == input.StorageLocationId && x.PropertyId == input.PropertyId)) return "Storage location must be in the selected property."; return null; }
     static Asset NewAsset(AssetInput x) { var a = new Asset { Name = "", Category = "" }; Apply(x, a); return a; }

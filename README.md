@@ -56,7 +56,7 @@ The application uses a multi-page, component-based architecture to organize func
 | Rooms | GET by floor/property, POST, PUT/{id}, DELETE | Rooms now live under floors |
 | Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
 | Paints (library) | GET/POST/PUT/DELETE paints; `rooms/{roomId}/paints` assign colours to room surfaces | Registry-first approach with room-specific mappings |
-| StorageLocations | GET by property, POST/PUT tree edits | Self-referencing hierarchy scoped per property |
+| StorageLocations | GET by property, POST/PUT tree edits, DELETE (empty leaf only) | Self-referencing hierarchy scoped per property; cycles rejected |
 | Assets | GET list/filter/archive, CRUD, move endpoint, archive toggle, photo CRUD | Cross-entity validation is enforced for property/floor/room references |
 | Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` | Room-scoped permanent items with type-specific metadata |
 | FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
