@@ -31,7 +31,7 @@ public sealed class Floor
 public sealed class Room
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid? PropertyId { get; set; }
+    public Guid PropertyId { get; set; }
     public Guid? FloorId { get; set; }
     public required string Name { get; set; }
     public string? Type { get; set; }
@@ -187,6 +187,7 @@ public sealed class Asset
     public string? Condition { get; set; }
     public string? Notes { get; set; }
     public bool IsArchived { get; set; }
+    public string? ExternalId { get; set; }
     public Property? Property { get; set; }
     public Room? Room { get; set; }
     public StorageLocation? StorageLocation { get; set; }
@@ -266,9 +267,13 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<StorageLocation>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Asset>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         model.Entity<Asset>().Property(x => x.Category).HasMaxLength(100).IsRequired();
+        model.Entity<Asset>().Property(x => x.ExternalId).HasMaxLength(200);
+        model.Entity<Asset>().HasIndex(x => x.ExternalId);
         model.Entity<AssetPhoto>().Property(x => x.StorageKey).HasMaxLength(512).IsRequired();
         model.Entity<AssetPhoto>().Property(x => x.Caption).HasMaxLength(240);
         model.Entity<Floor>().HasOne(x => x.Property).WithMany(x => x.Floors).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
+        // Room.PropertyId is denormalized from its floor; the FK mirrors the original Rooms table.
+        model.Entity<Room>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Room>().HasOne(x => x.Floor).WithMany(x => x.Rooms).HasForeignKey(x => x.FloorId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Surface>().HasOne(x => x.Room).WithMany(x => x.Surfaces).HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<PropertyPhoto>().HasOne(x => x.Property).WithMany(x => x.Photos).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);

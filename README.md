@@ -6,6 +6,7 @@ Local-only property management app built with ASP.NET Core Minimal APIs, EF Core
 
 ```powershell
 dotnet restore .\HomeInventory.sln
+dotnet tool restore   # dotnet-ef, for migrations
 dotnet build .\HomeInventory.sln
 dotnet run --project .\HomeInventory
 ```
@@ -22,7 +23,7 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Assets with categories, brand/model/serial numbers, valuation, condition, archive toggle, and optional room/storage-location placement
 - Fixtures scoped to rooms, with type-based metadata (e.g. manufacturer, model, serial number, warranty, installation/maintenance dates)
 - Photo metadata registry for external storage references on properties, rooms, fixtures, and assets
-- Dashboard summary metrics and category totals, including fixture and photo-backed inventory context
+- Dashboard summary metrics and category totals, grouped by property currency
 - Text search across asset names/categories/brands/serial numbers and fixture names/types
 - JSON export/import using versioned schema (v1) with external IDs to prevent re-import collisions; preview validation before confirm transactional import
 - **Enhanced UI with multi-page organization** for improved user experience
@@ -57,7 +58,7 @@ The application uses a multi-page, component-based architecture to organize func
 | Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
 | Paints (library) | GET/POST/PUT/DELETE paints; `rooms/{roomId}/paints` assign colours to room surfaces | Registry-first approach with room-specific mappings |
 | StorageLocations | GET by property, POST/PUT tree edits, DELETE (empty leaf only) | Self-referencing hierarchy scoped per property; cycles rejected |
-| Assets | GET list/filter/archive, CRUD, move endpoint, archive toggle, photo CRUD | Cross-entity validation is enforced for property/floor/room references |
+| Assets | GET list/filter (`archived=true/false`), POST, PUT, move, archive/unarchive (no hard delete), photo CRUD | Cross-entity validation is enforced for property/floor/room references |
 | Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` | Room-scoped permanent items with type-specific metadata |
 | FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
 | AssetPhotos | GET/POST/DELETE under `/assets/{id}/photos` | External photo references for assets |
@@ -89,4 +90,4 @@ ImportPreviewDto {
 }
 ```
 
-All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.
+All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Assets remember their imported external ID, so re-importing the same file flags those assets as duplicates to skip. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.

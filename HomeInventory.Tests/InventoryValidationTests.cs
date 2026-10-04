@@ -206,6 +206,30 @@ public sealed class InventoryValidationTests
     }
 
     [Fact]
+    public async Task ImportPreview_DetectsDuplicatesByExternalId()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        InventoryExport ImportOf(params ImportAsset[] assets) =>
+            new(1, [new ImportProperty("prop-1", "Main House", null, null, null, null, null)], [], [], [], [], [.. assets], []);
+        ImportAsset Asset(string externalId, string name) => new(externalId, "prop-1", null, null, name, "Tools", null, null, null, null, null, null, null, null, null);
+
+        var first = ImportOf(Asset("asset-1", "Drill"));
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/import/confirm", new { inventory = first, skipExternalIds = new List<string>() })).StatusCode);
+
+        // Same external ID under a new name is a duplicate; a different ID with the same name is a new asset.
+        var second = ImportOf(Asset("asset-1", "Cordless drill"), Asset("asset-2", "Drill"));
+        var preview = await (await client.PostAsJsonAsync("/api/import/preview", second)).Content.ReadFromJsonAsync<ImportPreviewDto>();
+        Assert.NotNull(preview);
+        Assert.Equal(["asset-1"], preview.DuplicateExternalIds);
+
+        // Exports keep the imported external ID so backup → restore → backup cycles stay recognisable.
+        var export = await client.GetFromJsonAsync<InventoryExport>("/api/export");
+        Assert.NotNull(export);
+        Assert.Equal("asset-1", Assert.Single(export.Assets).ExternalId);
+    }
+
+    [Fact]
     public async Task Assets_ArchiveAndUnarchive_NoHardDelete()
     {
         using var factory = new CustomWebApplicationFactory();
