@@ -1,0 +1,110 @@
+@page "/labels"
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject NavigationManager Navigation
+
+<PageTitle>QR labels</PageTitle>
+
+<div class="no-print">
+    <h1>QR labels</h1>
+    <p class="lead">Print labels for boxes, shelves, cupboards and tools. Scanning a label opens the item in this app.</p>
+    <div class="alert alert-warning small">
+        Labels link to <code>@Navigation.BaseUri</code>. The app currently only listens on this computer, so a phone can scan the code but can't open the link until network access is set up.
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-4">
+            <select class="form-select" @bind="propertyId" @bind:after="LoadAsync">
+                <option value="">Choose property</option>
+                @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
+            </select>
+        </div>
+        <div class="col-md-8 d-flex gap-2 align-items-center">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SelectAll" disabled="@(propertyId == "")">Select all</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => selected.Clear()" disabled="@(selected.Count == 0)">Clear</button>
+            <button class="btn btn-primary" @onclick="PrintAsync" disabled="@(selected.Count == 0)">Print @selected.Count label(s)</button>
+        </div>
+    </div>
+
+    @if (propertyId != "")
+    {
+        <div class="row g-4 mb-4">
+            <div class="col-md-6">
+                <h2 class="h5">Storage locations</h2>
+                @if (locations.Count == 0) { <p class="text-muted">No storage locations.</p> }
+                @foreach (var location in locations)
+                {
+                    var key = $"location:{location.Id}";
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="@key" checked="@selected.Contains(key)" @onchange="() => Toggle(key)" />
+                        <label class="form-check-label" for="@key">@location.Path</label>
+                    </div>
+                }
+            </div>
+            <div class="col-md-6">
+                <h2 class="h5">Assets</h2>
+                @if (assets.Count == 0) { <p class="text-muted">No active assets.</p> }
+                @foreach (var asset in assets)
+                {
+                    var key = $"asset:{asset.Id}";
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="@key" checked="@selected.Contains(key)" @onchange="() => Toggle(key)" />
+                        <label class="form-check-label" for="@key">@asset.Name <span class="text-muted small">@asset.LocationPath</span></label>
+                    </div>
+                }
+            </div>
+        </div>
+        @if (selected.Count > 0) { <h2 class="h5">Preview</h2> }
+    }
+</div>
+
+<div class="label-grid">
+    @foreach (var label in Selected())
+    {
+        <div class="qr-label">
+            <img src="@($"api/qr?text={Uri.EscapeDataString(label.Url)}")" alt="QR code for @label.Title" />
+            <div class="qr-label-text">
+                <strong>@label.Title</strong>
+                <div class="small">@label.Subtitle</div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    List<PropertyDto> properties = [];
+    List<StorageLocationDto> locations = [];
+    List<AssetDto> assets = [];
+    readonly HashSet<string> selected = [];
+    string propertyId = "";
+
+    record Label(string Title, string? Subtitle, string Url);
+
+    protected override async Task OnInitializedAsync() => properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+
+    async Task LoadAsync()
+    {
+        selected.Clear();
+        locations = []; assets = [];
+        if (!Guid.TryParse(propertyId, out var id)) return;
+        locations = await Http.GetFromJsonAsync<List<StorageLocationDto>>($"api/locations?propertyId={id}") ?? [];
+        assets = await Http.GetFromJsonAsync<List<AssetDto>>($"api/assets?propertyId={id}&archived=false") ?? [];
+    }
+
+    void Toggle(string key)
+    {
+        if (!selected.Remove(key)) selected.Add(key);
+    }
+
+    void SelectAll()
+    {
+        foreach (var location in locations) selected.Add($"location:{location.Id}");
+        foreach (var asset in assets) selected.Add($"asset:{asset.Id}");
+    }
+
+    IEnumerable<Label> Selected() =>
+        locations.Where(l => selected.Contains($"location:{l.Id}")).Select(l => new Label(l.Name, l.Path == l.Name ? l.Type : l.Path, $"{Navigation.BaseUri}scan/location/{l.Id}"))
+            .Concat(assets.Where(a => selected.Contains($"asset:{a.Id}")).Select(a => new Label(a.Name, a.LocationPath ?? a.Category, $"{Navigation.BaseUri}scan/asset/{a.Id}")));
+
+    async Task PrintAsync() => await Js.InvokeVoidAsync("print");
+}

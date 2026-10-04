@@ -1,0 +1,106 @@
+@page "/scan/{Kind}/{Id:guid}"
+@inject HttpClient Http
+
+<PageTitle>@(title ?? "Scanned label")</PageTitle>
+
+@if (notFound)
+{
+    <div class="alert alert-warning">This label points to something that no longer exists.</div>
+}
+else if (Kind == "location" && location is not null)
+{
+    <h1>@location.Name</h1>
+    <p class="lead">@location.Path @(string.IsNullOrEmpty(location.Type) ? "" : $"· {location.Type}")</p>
+    @if (children.Count > 0)
+    {
+        <h2 class="h5">Inside</h2>
+        <ul class="list-group mb-3">
+            @foreach (var child in children) { <li class="list-group-item"><a href="scan/location/@child.Id">@child.Name</a> <span class="text-muted small">@child.Type</span></li> }
+        </ul>
+    }
+    <h2 class="h5">Stored here</h2>
+    @if (contents.Count == 0)
+    {
+        <p class="text-muted">Nothing is recorded in this location.</p>
+    }
+    else
+    {
+        <ul class="list-group">
+            @foreach (var asset in contents) { <li class="list-group-item"><a href="scan/asset/@asset.Id">@asset.Name</a> <span class="text-muted small">@asset.Category</span></li> }
+        </ul>
+    }
+}
+else if (Kind == "asset" && asset is not null)
+{
+    <h1>@asset.Name @if (asset.IsArchived) { <span class="badge text-bg-secondary">archived</span> }</h1>
+    <p class="lead">@asset.Category @(string.IsNullOrWhiteSpace($"{asset.Brand}{asset.Model}") ? "" : $"· {asset.Brand} {asset.Model}")</p>
+    <dl class="row">
+        <dt class="col-sm-3">Location</dt><dd class="col-sm-9">@(asset.LocationPath ?? "Not placed")</dd>
+        @if (!string.IsNullOrEmpty(asset.SerialNumber)) { <dt class="col-sm-3">Serial</dt><dd class="col-sm-9">@asset.SerialNumber</dd> }
+        @if (asset.PurchaseDate is not null) { <dt class="col-sm-3">Purchased</dt><dd class="col-sm-9">@asset.PurchaseDate?.ToString("yyyy-MM-dd")</dd> }
+        @if (!string.IsNullOrEmpty(asset.Description)) { <dt class="col-sm-3">Description</dt><dd class="col-sm-9">@asset.Description</dd> }
+    </dl>
+    @if (documents.Count > 0)
+    {
+        <h2 class="h5">Documents</h2>
+        <ul class="list-group">
+            @foreach (var doc in documents)
+            {
+                var url = PhotoManager.FileUrl(doc.StorageKey);
+                <li class="list-group-item">@if (url is not null) { <a href="@url" target="_blank">@doc.Title</a> } else { @doc.Title } <span class="badge text-bg-light">@doc.Kind</span></li>
+            }
+        </ul>
+    }
+    <p class="mt-3"><a href="assets">Manage assets</a></p>
+}
+else if (!loaded)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div class="alert alert-warning">Unknown label type.</div>
+}
+
+@code {
+    [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public Guid Id { get; set; }
+
+    StorageLocationDto? location;
+    List<StorageLocationDto> children = [];
+    List<AssetDto> contents = [];
+    AssetDto? asset;
+    List<DocumentDto> documents = [];
+    string? title;
+    bool loaded, notFound;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loaded = notFound = false;
+        location = null; asset = null;
+        if (Kind == "location")
+        {
+            var all = await Http.GetFromJsonAsync<List<StorageLocationDto>>("api/locations") ?? [];
+            location = all.FirstOrDefault(x => x.Id == Id);
+            if (location is null) notFound = true;
+            else
+            {
+                title = location.Name;
+                children = all.Where(x => x.ParentId == Id).OrderBy(x => x.Name).ToList();
+                contents = (await Http.GetFromJsonAsync<List<AssetDto>>($"api/assets?propertyId={location.PropertyId}&archived=false") ?? []).Where(x => x.StorageLocationId == Id).ToList();
+            }
+        }
+        else if (Kind == "asset")
+        {
+            var response = await Http.GetAsync($"api/assets/{Id}");
+            if (!response.IsSuccessStatusCode) notFound = true;
+            else
+            {
+                asset = await response.Content.ReadFromJsonAsync<AssetDto>();
+                title = asset?.Name;
+                documents = await Http.GetFromJsonAsync<List<DocumentDto>>($"api/documents?assetId={Id}") ?? [];
+            }
+        }
+        loaded = true;
+    }
+}

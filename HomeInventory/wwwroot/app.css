@@ -90,3 +90,30 @@ h1:focus {
         content: none !important;
     }
 }
+
+/* QR label sheet: three labels per row on screen and paper. */
+.label-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+}
+
+.qr-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px dashed #bbb;
+    padding: 0.5rem;
+    break-inside: avoid;
+}
+
+.qr-label img {
+    width: 96px;
+    height: 96px;
+    flex: none;
+}
+
+.qr-label-text {
+    overflow-wrap: anywhere;
+    font-size: 0.85rem;
+}

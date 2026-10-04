@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using HomeInventory.Client;
 using Microsoft.EntityFrameworkCore;
+using QRCoder;
 
 namespace HomeInventory;
 
@@ -571,6 +572,11 @@ public static class InventoryApi
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
+        api.MapGet("/assets/{id:guid}", async (Guid id, InventoryDbContext db) =>
+        {
+            var asset = await db.Assets.Where(x => x.Id == id).Select(x => new { x.PropertyId, x.IsArchived }).SingleOrDefaultAsync();
+            return asset is null ? Results.NotFound() : Results.Ok((await AssetDtos(db, asset.PropertyId, asset.IsArchived)).Single(x => x.Id == id));
+        });
         api.MapGet("/assets/{id:guid}/history", async (Guid id, InventoryDbContext db) =>
         {
             if (!await db.Assets.AnyAsync(x => x.Id == id)) return Results.NotFound();
@@ -760,6 +766,14 @@ public static class InventoryApi
                     items.Where(x => x.Kind == "Asset").Sum(x => x.CurrentValue ?? 0), items.Where(x => x.Kind == "Fixture").Sum(x => x.CurrentValue ?? 0), categories, items);
             }).ToList();
             return Results.Ok(new InsuranceReportDto(Today(), report));
+        });
+        // QR code as SVG for printable labels (the text is normally a link to the item's scan page).
+        api.MapGet("/qr", (string? text) =>
+        {
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 512) return Results.BadRequest("Text is required and must be 512 characters or fewer.");
+            using var generator = new QRCodeGenerator();
+            using var data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.M);
+            return Results.Content(new SvgQRCode(data).GetGraphic(4), "image/svg+xml");
         });
         api.MapGet("/dashboard", async (InventoryDbContext db) =>
         {

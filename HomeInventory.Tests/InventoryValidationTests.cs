@@ -857,6 +857,27 @@ public sealed class InventoryValidationTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/reports/insurance?propertyId={Guid.NewGuid()}")).StatusCode);
     }
 
+    [Fact]
+    public async Task QrCodes_AndSingleAssetLookupSupportLabels()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var asset = await CreateAssetAsync(client, property.Id, null, null, "Drill");
+
+        var qr = await client.GetAsync($"/api/qr?text={Uri.EscapeDataString($"https://localhost/scan/asset/{asset.Id}")}");
+        Assert.Equal(HttpStatusCode.OK, qr.StatusCode);
+        Assert.Equal("image/svg+xml", qr.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("<svg", await qr.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/qr")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/qr?text={new string('x', 513)}")).StatusCode);
+
+        await client.PostAsync($"/api/assets/{asset.Id}/archive", null);
+        var found = await client.GetFromJsonAsync<AssetDto>($"/api/assets/{asset.Id}");
+        Assert.True(found!.IsArchived); // labels on archived items still resolve
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/assets/{Guid.NewGuid()}")).StatusCode);
+    }
+
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
