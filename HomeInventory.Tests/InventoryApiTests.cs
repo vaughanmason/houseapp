@@ -103,7 +103,7 @@ public sealed class InventoryApiTests
         var room = await roomResponse.Content.ReadFromJsonAsync<RoomDto>();
         Assert.NotNull(room);
 
-        var fixtureResponse = await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", new FixtureInput(room.Id, "Sink", "Sink", "Acme", "Model-1", "SN123", new DateOnly(2024, 1, 2), 400m, 350m, "2 years", "https://example.com/manual", "Bob", new DateOnly(2024, 1, 3), "Annual", new DateOnly(2025, 1, 3), "Good", "Kitchen sink"));
+        var fixtureResponse = await client.PostAsJsonAsync($"/api/rooms/{room.Id}/fixtures", new FixtureInput(room.Id, "Sink", "Sink", "Acme", "Model-1", "SN123", new DateOnly(2024, 1, 2), 400m, 350m, "2 years", "https://example.com/manual", "Bob", new DateOnly(2024, 1, 3), "Good", "Kitchen sink"));
         Assert.Equal(HttpStatusCode.Created, fixtureResponse.StatusCode);
         var fixture = await fixtureResponse.Content.ReadFromJsonAsync<FixtureDto>();
         Assert.NotNull(fixture);

@@ -42,7 +42,7 @@ public sealed class Room : IHasExternalId
     public Guid Id { get; set; } = Guid.NewGuid();
     public string? ExternalId { get; set; }
     public Guid PropertyId { get; set; }
-    public Guid? FloorId { get; set; }
+    public Guid FloorId { get; set; }
     public required string Name { get; set; }
     public string? Type { get; set; }
     public decimal? Area { get; set; }
@@ -155,8 +155,6 @@ public sealed class Fixture : IHasExternalId
     public string? ManualUrl { get; set; }
     public string? InstallerName { get; set; }
     public DateOnly? InstallationDate { get; set; }
-    public string? MaintenanceSchedule { get; set; }
-    public DateOnly? LastMaintenanceDate { get; set; }
     public string? Condition { get; set; }
     public string? Notes { get; set; }
     /// <summary>"Fixture" (sink, cupboard...) or "Utility" (meter, inverter, internet...); utilities reuse everything fixtures have.</summary>
@@ -210,6 +208,8 @@ public sealed class Asset : IHasExternalId
     public string? Condition { get; set; }
     public string? Notes { get; set; }
     public bool IsArchived { get; set; }
+    public string? Barcode { get; set; }
+    public string? ManualUrl { get; set; }
     public Property? Property { get; set; }
     public Room? Room { get; set; }
     public StorageLocation? StorageLocation { get; set; }
@@ -364,7 +364,6 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<Fixture>().Property(x => x.Warranty).HasMaxLength(240);
         model.Entity<Fixture>().Property(x => x.ManualUrl).HasMaxLength(512);
         model.Entity<Fixture>().Property(x => x.InstallerName).HasMaxLength(160);
-        model.Entity<Fixture>().Property(x => x.MaintenanceSchedule).HasMaxLength(400);
         model.Entity<Fixture>().Property(x => x.Condition).HasMaxLength(80);
         model.Entity<Fixture>().Property(x => x.Notes).HasMaxLength(1000);
         model.Entity<Fixture>().Property(x => x.Category).HasMaxLength(20).HasDefaultValue("Fixture").IsRequired();
@@ -375,6 +374,9 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<StorageLocation>().Property(x => x.Name).HasMaxLength(160).IsRequired();
         model.Entity<Asset>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         model.Entity<Asset>().Property(x => x.Category).HasMaxLength(100).IsRequired();
+        model.Entity<Asset>().Property(x => x.Barcode).HasMaxLength(100);
+        model.Entity<Asset>().Property(x => x.ManualUrl).HasMaxLength(512);
+        model.Entity<Asset>().HasIndex(x => x.Barcode);
         model.Entity<AssetPhoto>().Property(x => x.StorageKey).HasMaxLength(512).IsRequired();
         model.Entity<AssetPhoto>().Property(x => x.Caption).HasMaxLength(240);
         model.Entity<Floor>().HasOne(x => x.Property).WithMany(x => x.Floors).HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);

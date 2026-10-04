@@ -59,8 +59,7 @@
             <input class="form-control mb-2" @bind="fixtureManualUrl" placeholder="Manual URL" />
             <input class="form-control mb-2" @bind="fixtureInstallerName" placeholder="Installer" />
             <input class="form-control mb-2" @bind="fixtureInstallationDate" placeholder="Installation date (YYYY-MM-DD)" />
-            <input class="form-control mb-2" @bind="fixtureMaintenanceSchedule" placeholder="Maintenance schedule" />
-            <input class="form-control mb-2" @bind="fixtureLastMaintenanceDate" placeholder="Last maintenance (YYYY-MM-DD)" />
+            <p class="small text-muted mb-2">Schedule servicing on the <a href="maintenance">Maintenance</a> page.</p>
 
             <h5 class="mt-3">Details</h5>
             <input class="form-control mb-2" @bind="fixtureCondition" placeholder="Condition" />
@@ -165,7 +164,7 @@
 
     string roomId = "", fixtureName = "", fixtureType = "", fixtureManufacturer = "", fixtureModel = "", fixtureSerialNumber = "";
     string fixturePurchaseDate = "", fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "";
-    string fixtureInstallerName = "", fixtureInstallationDate = "", fixtureMaintenanceSchedule = "", fixtureLastMaintenanceDate = "", fixtureCondition = "", fixtureNotes = "";
+    string fixtureInstallerName = "", fixtureInstallationDate = "", fixtureCondition = "", fixtureNotes = "";
     string photoFixtureId = "", fixtureCategory = "Fixture", fixtureProvider = "", fixtureAccountNumber = "";
 
     static readonly string[] FixtureTypes = ["Sink", "Toilet", "Shower", "Bath", "Built-in cupboard", "Window", "Door", "Air conditioner", "Ceiling fan", "Light fitting", "Alarm", "Oven", "Hob", "Extractor"];
@@ -209,8 +208,6 @@
         fixtureManualUrl = fixture.ManualUrl ?? "";
         fixtureInstallerName = fixture.InstallerName ?? "";
         fixtureInstallationDate = fixture.InstallationDate?.ToString("yyyy-MM-dd") ?? "";
-        fixtureMaintenanceSchedule = fixture.MaintenanceSchedule ?? "";
-        fixtureLastMaintenanceDate = fixture.LastMaintenanceDate?.ToString("yyyy-MM-dd") ?? "";
         fixtureCondition = fixture.Condition ?? "";
         fixtureNotes = fixture.Notes ?? "";
         fixtureCategory = fixture.Category;
@@ -228,7 +225,7 @@
     {
         roomId = fixtureName = fixtureType = fixtureManufacturer = fixtureModel = fixtureSerialNumber = "";
         fixturePurchaseDate = fixturePurchasePrice = fixtureCurrentValue = fixtureWarranty = fixtureManualUrl = "";
-        fixtureInstallerName = fixtureInstallationDate = fixtureMaintenanceSchedule = fixtureLastMaintenanceDate = fixtureCondition = fixtureNotes = "";
+        fixtureInstallerName = fixtureInstallationDate = fixtureCondition = fixtureNotes = "";
         fixtureProvider = fixtureAccountNumber = "";
         fixtureCategory = Category ?? "Fixture";
     }
@@ -240,8 +237,8 @@
         if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(fixtureType)) { error = "Name and type are required."; return; }
 
         var response = editingFixtureId is null
-            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null))
-            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureMaintenanceSchedule, TryDateOnly(fixtureLastMaintenanceDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null));
+            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null))
+            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null));
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingFixtureId = null;

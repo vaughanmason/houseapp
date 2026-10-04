@@ -287,8 +287,6 @@ public static class InventoryApi
                 ManualUrl = input.ManualUrl?.Trim(),
                 InstallerName = input.InstallerName?.Trim(),
                 InstallationDate = input.InstallationDate,
-                MaintenanceSchedule = input.MaintenanceSchedule?.Trim(),
-                LastMaintenanceDate = input.LastMaintenanceDate,
                 Condition = input.Condition?.Trim(),
                 Notes = input.Notes?.Trim(),
                 Category = FixtureCategory(input.Category),
@@ -335,8 +333,6 @@ public static class InventoryApi
             entity.ManualUrl = input.ManualUrl?.Trim();
             entity.InstallerName = input.InstallerName?.Trim();
             entity.InstallationDate = input.InstallationDate;
-            entity.MaintenanceSchedule = input.MaintenanceSchedule?.Trim();
-            entity.LastMaintenanceDate = input.LastMaintenanceDate;
             entity.Condition = input.Condition?.Trim();
             entity.Notes = input.Notes?.Trim();
             entity.Category = FixtureCategory(input.Category);
@@ -806,7 +802,8 @@ public static class InventoryApi
             const int Limit = 50;
 
             var assets = await AssetDtos(db, db.Assets.Where(x => !x.IsArchived && (EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.Category, pattern, "\\")
-                || EF.Functions.Like(x.Brand, pattern, "\\") || EF.Functions.Like(x.Model, pattern, "\\") || EF.Functions.Like(x.SerialNumber, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\"))).Take(Limit));
+                || EF.Functions.Like(x.Brand, pattern, "\\") || EF.Functions.Like(x.Model, pattern, "\\") || EF.Functions.Like(x.SerialNumber, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\")
+                || EF.Functions.Like(x.Barcode, pattern, "\\"))).Take(Limit));
             var fixtures = await FixtureDtos(db, db.Fixtures.Where(x => EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.Type, pattern, "\\") || EF.Functions.Like(x.Manufacturer, pattern, "\\")
                 || EF.Functions.Like(x.Model, pattern, "\\") || EF.Functions.Like(x.SerialNumber, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\") || EF.Functions.Like(x.Provider, pattern, "\\")).Take(Limit));
             // Location paths are computed, so locations (a small table) are matched in memory.
@@ -983,7 +980,7 @@ public static class InventoryApi
 
             foreach (var fixture in (inventory.Fixtures ?? []).Where(x => !fixtures.ContainsKey(x.ExternalId)))
             {
-                var entity = new Fixture { ExternalId = fixture.ExternalId, RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, MaintenanceSchedule = fixture.MaintenanceSchedule, LastMaintenanceDate = fixture.LastMaintenanceDate, Condition = fixture.Condition, Notes = fixture.Notes, Category = FixtureCategory(fixture.Category), Provider = fixture.Provider, AccountNumber = fixture.AccountNumber };
+                var entity = new Fixture { ExternalId = fixture.ExternalId, RoomId = rooms[fixture.RoomExternalId], Name = fixture.Name, Type = fixture.Type, Manufacturer = fixture.Manufacturer, Model = fixture.Model, SerialNumber = fixture.SerialNumber, PurchaseDate = fixture.PurchaseDate, PurchasePrice = fixture.PurchasePrice, CurrentValue = fixture.CurrentValue, Warranty = fixture.Warranty, ManualUrl = fixture.ManualUrl, InstallerName = fixture.InstallerName, InstallationDate = fixture.InstallationDate, Condition = fixture.Condition, Notes = fixture.Notes, Category = FixtureCategory(fixture.Category), Provider = fixture.Provider, AccountNumber = fixture.AccountNumber };
                 db.Fixtures.Add(entity);
                 fixtures[fixture.ExternalId] = entity.Id;
             }
@@ -1014,13 +1011,21 @@ public static class InventoryApi
 
             foreach (var asset in inventory.Assets.Where(x => !assets.ContainsKey(x.ExternalId) && !confirmation.SkipExternalIds.Contains(x.ExternalId)))
             {
-                var entity = new Asset { ExternalId = asset.ExternalId, PropertyId = properties[asset.PropertyExternalId], RoomId = asset.RoomExternalId is null ? null : rooms[asset.RoomExternalId], StorageLocationId = asset.StorageLocationExternalId is null ? null : locations[asset.StorageLocationExternalId], Name = asset.Name, Category = asset.Category, Description = asset.Description, Brand = asset.Brand, Model = asset.Model, SerialNumber = asset.SerialNumber, PurchaseDate = asset.PurchaseDate, PurchasePrice = asset.PurchasePrice, CurrentValue = asset.CurrentValue, Condition = asset.Condition, Notes = asset.Notes };
+                var entity = new Asset { ExternalId = asset.ExternalId, PropertyId = properties[asset.PropertyExternalId], RoomId = asset.RoomExternalId is null ? null : rooms[asset.RoomExternalId], StorageLocationId = asset.StorageLocationExternalId is null ? null : locations[asset.StorageLocationExternalId], Name = asset.Name, Category = asset.Category, Description = asset.Description, Brand = asset.Brand, Model = asset.Model, SerialNumber = asset.SerialNumber, PurchaseDate = asset.PurchaseDate, PurchasePrice = asset.PurchasePrice, CurrentValue = asset.CurrentValue, Condition = asset.Condition, Notes = asset.Notes, Barcode = asset.Barcode, ManualUrl = asset.ManualUrl };
                 db.Assets.Add(entity);
                 assets[asset.ExternalId] = entity.Id;
             }
             foreach (var photo in (inventory.AssetPhotos ?? []).Where(x => !assetPhotos.ContainsKey(x.ExternalId) && assets.ContainsKey(x.AssetExternalId)))
                 db.AssetPhotos.Add(new AssetPhoto { ExternalId = photo.ExternalId, AssetId = assets[photo.AssetExternalId], StorageKey = photo.StorageKey?.Trim() ?? string.Empty, Caption = photo.Caption?.Trim(), SortOrder = photo.SortOrder });
 
+            var fixturesWithTasks = (inventory.MaintenanceTasks ?? []).Select(x => x.FixtureExternalId).ToHashSet();
+            foreach (var fixture in (inventory.Fixtures ?? []).Where(x => (!string.IsNullOrWhiteSpace(x.MaintenanceSchedule) || x.LastMaintenanceDate is not null) && !fixturesWithTasks.Contains(x.ExternalId) && fixtures.ContainsKey(x.ExternalId)))
+            {
+                var legacyKey = $"{fixture.ExternalId}:legacy-maintenance";
+                if (tasks.ContainsKey(legacyKey)) continue;
+                var floorId = floors[inventory.Rooms.Single(r => r.ExternalId == fixture.RoomExternalId).FloorExternalId];
+                db.MaintenanceTasks.Add(new MaintenanceTask { ExternalId = legacyKey, PropertyId = floorProperties[floorId], FixtureId = fixtures[fixture.ExternalId], Title = $"Service: {fixture.Name}"[..Math.Min(200, fixture.Name.Length + 9)], Notes = fixture.MaintenanceSchedule?.Trim(), LastCompletedOn = fixture.LastMaintenanceDate });
+            }
             foreach (var task in (inventory.MaintenanceTasks ?? []).Where(x => !tasks.ContainsKey(x.ExternalId)))
             {
                 var recurring = task.IntervalValue is > 0;
@@ -1068,10 +1073,10 @@ public static class InventoryApi
     }
     public sealed record ImportConfirmation(InventoryExport Inventory, List<string> SkipExternalIds);
     static PropertyDto ToDto(Property x) => new(x.Id, x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes, x.Currency);
-    static FixtureDto ToDto(Fixture x, string? locationPath) => new(x.Id, x.RoomId, x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, locationPath, x.Category, x.Provider, x.AccountNumber);
+    static FixtureDto ToDto(Fixture x, string? locationPath) => new(x.Id, x.RoomId, x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.Condition, x.Notes, locationPath, x.Category, x.Provider, x.AccountNumber);
     static string FixtureCategory(string? value) => string.Equals(value?.Trim(), "Utility", StringComparison.OrdinalIgnoreCase) ? "Utility" : "Fixture";
     static FloorDto ToDto(Floor x) => new(x.Id, x.PropertyId, x.Name, x.Notes);
-    static RoomDto ToDto(Room x) => new(x.Id, x.FloorId ?? Guid.Empty, x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes);
+    static RoomDto ToDto(Room x) => new(x.Id, x.FloorId, x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes);
     static SurfaceDto ToDto(Surface x) => new(x.Id, x.RoomId, x.Name, x.SurfaceType, x.PaintBrand, x.ColorName, x.ColorCode, x.Finish, x.Coats, x.PaintedDate, x.Painter, x.QuantityPurchased, x.Manufacturer, x.ProductName, x.Material, x.Supplier, x.Warranty, x.Invoice, x.InstallationDate, x.Notes, x.SortOrder);
     static PaintDto ToDto(Paint x) => new(x.Id, x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes);
     static PhotoMetadataDto ToDto(PropertyPhoto x) => new(x.Id, x.StorageKey, x.Caption, x.SortOrder);
@@ -1254,7 +1259,7 @@ public static class InventoryApi
             x.StorageLocationId is Guid location ? locationPaths.GetValueOrDefault(location) :
             x.RoomId is Guid room ? roomNames.GetValueOrDefault(room) : null;
         return list.OrderBy(x => x.Name)
-            .Select(x => new AssetDto(x.Id, x.PropertyId, x.RoomId, x.StorageLocationId, x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes, x.IsArchived, LocationPath(x)))
+            .Select(x => new AssetDto(x.Id, x.PropertyId, x.RoomId, x.StorageLocationId, x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes, x.IsArchived, LocationPath(x), x.Barcode, x.ManualUrl))
             .ToList();
     }
     static async Task<bool> IsDescendant(InventoryDbContext db, Guid candidateId, Guid ancestorId)
@@ -1306,6 +1311,8 @@ public static class InventoryApi
         a.CurrentValue = x.CurrentValue;
         a.Condition = x.Condition?.Trim();
         a.Notes = x.Notes?.Trim();
+        a.Barcode = x.Barcode?.Trim();
+        a.ManualUrl = x.ManualUrl?.Trim();
     }
     static async Task<InventoryExport> Export(InventoryDbContext db)
     {
@@ -1339,12 +1346,12 @@ public static class InventoryApi
         return new(1,
             props.Select(x => new ImportProperty(Ext(x), x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes, NormalizeCurrency(x.Currency) ?? "USD")).ToList(),
             floors.Select(x => new ImportFloor(Ext(x), propertyIds[x.PropertyId], x.Name, x.Notes)).ToList(),
-            rooms.Select(x => new ImportRoom(Ext(x), x.FloorId is Guid floorId ? floorIds[floorId] : string.Empty, x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes)).ToList(),
+            rooms.Select(x => new ImportRoom(Ext(x), floorIds[x.FloorId], x.Name, x.Type, x.Area, x.Volume, x.CeilingHeight, x.Length, x.Width, x.Height, x.Flooring, x.WallFinish, x.CeilingFinish, x.PaintDetails, x.WindowsCount, x.DoorsCount, x.FixturesNotes, x.UtilitiesNotes, x.Notes)).ToList(),
             surfaces.Select(x => new ImportSurface(Ext(x), roomIds[x.RoomId], x.Name, x.SurfaceType, x.PaintBrand, x.ColorName, x.ColorCode, x.Finish, x.Coats, x.PaintedDate, x.Painter, x.QuantityPurchased, x.Manufacturer, x.ProductName, x.Material, x.Supplier, x.Warranty, x.Invoice, x.InstallationDate, x.Notes, x.SortOrder)).ToList(),
             locs.Select(x => new ImportStorageLocation(Ext(x), propertyIds[x.PropertyId], x.ParentId is Guid parentId ? locationIds[parentId] : null, x.Name, x.Type)).ToList(),
-            assets.Select(x => new ImportAsset(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid roomId ? roomIds[roomId] : null, x.StorageLocationId is Guid locationId ? locationIds[locationId] : null, x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes)).ToList(),
+            assets.Select(x => new ImportAsset(Ext(x), propertyIds[x.PropertyId], x.RoomId is Guid roomId ? roomIds[roomId] : null, x.StorageLocationId is Guid locationId ? locationIds[locationId] : null, x.Name, x.Category, x.Description, x.Brand, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Condition, x.Notes, x.Barcode, x.ManualUrl)).ToList(),
             propertyPhotos.Select(x => new ImportPropertyPhoto(Ext(x), propertyIds[x.PropertyId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
-            fixtures.Select(x => new ImportFixture(Ext(x), roomIds[x.RoomId], x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, x.Category, x.Provider, x.AccountNumber)).ToList(),
+            fixtures.Select(x => new ImportFixture(Ext(x), roomIds[x.RoomId], x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.Condition, x.Notes, x.Category, x.Provider, x.AccountNumber)).ToList(),
             assetPhotos.Select(x => new ImportAssetPhoto(Ext(x), assetIds[x.AssetId], x.StorageKey, x.Caption, x.SortOrder)).ToList(),
             paints.Select(x => new ImportPaint(Ext(x), x.Brand, x.ColorName, x.ColorCode, x.Finish, x.Notes)).ToList(),
             roomPaints.Select(x => new ImportRoomPaint($"{roomIds[x.RoomId]}:{paintIds[x.PaintId]}", roomIds[x.RoomId], paintIds[x.PaintId], x.SortOrder, x.Surface)).ToList(),

@@ -38,6 +38,8 @@
             <input class="form-control mb-2" @bind="assetBrand" placeholder="Brand" />
             <input class="form-control mb-2" @bind="assetModel" placeholder="Model" />
             <input class="form-control mb-2" @bind="assetSerialNumber" placeholder="Serial number" />
+            <input class="form-control mb-2" @bind="assetBarcode" placeholder="Barcode (EAN/UPC or your own label)" />
+            <input class="form-control mb-2" @bind="assetManualUrl" placeholder="Manual link (URL)" />
 
             <h5 class="mt-3">Financial</h5>
             <input class="form-control mb-2" @bind="assetPurchaseDate" placeholder="Purchase date (YYYY-MM-DD)" />
@@ -93,6 +95,13 @@
                                 @if (!string.IsNullOrEmpty(asset.Brand) || !string.IsNullOrEmpty(asset.Model))
                                 {
                                     <div class="small text-muted">@asset.Brand @asset.Model</div>
+                                }
+                                @if (!string.IsNullOrEmpty(asset.Barcode) || !string.IsNullOrEmpty(asset.ManualUrl))
+                                {
+                                    <div class="small text-muted">
+                                        @if (!string.IsNullOrEmpty(asset.Barcode)) { <span>Barcode @asset.Barcode</span> }
+                                        @if (Uri.TryCreate(asset.ManualUrl, UriKind.Absolute, out var manual) && (manual.Scheme == "http" || manual.Scheme == "https")) { <a class="ms-2" href="@manual" target="_blank" rel="noopener">Manual</a> }
+                                    </div>
                                 }
                                 <div class="small text-muted">
                                     Location: @asset.LocationPath
@@ -267,7 +276,7 @@
 
     string propertyId = "", roomId = "", storageLocationId = "", assetName = "", assetCategory = "", assetDescription = "";
     string assetBrand = "", assetModel = "", assetSerialNumber = "", assetPurchaseDate = "";
-    string assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "";
+    string assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "", assetBarcode = "", assetManualUrl = "";
     string storagePropertyId = "", newStorageParentId = "", newStorageName = "", newStorageType = "";
     string photoAssetId = "";
     string searchQuery = "";
@@ -342,6 +351,8 @@
         assetCurrentValue = asset.CurrentValue?.ToString() ?? "";
         assetCondition = asset.Condition ?? "";
         assetNotes = asset.Notes ?? "";
+        assetBarcode = asset.Barcode ?? "";
+        assetManualUrl = asset.ManualUrl ?? "";
     }
 
     void CancelEdit()
@@ -355,6 +366,7 @@
         propertyId = roomId = storageLocationId = assetName = assetCategory = assetDescription = "";
         assetBrand = assetModel = assetSerialNumber = assetPurchaseDate = "";
         assetPurchasePrice = assetCurrentValue = assetCondition = assetNotes = "";
+        assetBarcode = assetManualUrl = "";
     }
 
     async Task RefreshLocationsAndRooms() => StateHasChanged();
@@ -377,7 +389,9 @@
                 a.Name.ToLower().Contains(query) || 
                 a.Category.ToLower().Contains(query) ||
                 (a.Brand?.ToLower().Contains(query) ?? false) ||
-                (a.Model?.ToLower().Contains(query) ?? false)
+                (a.Model?.ToLower().Contains(query) ?? false) ||
+                (a.SerialNumber?.ToLower().Contains(query) ?? false) ||
+                (a.Barcode?.ToLower().Contains(query) ?? false)
             ).ToList();
         }
         return filtered.OrderBy(a => a.Name).ToList();
@@ -393,8 +407,8 @@
         var storageLocIdGuid = Guid.TryParse(storageLocationId, out var slid) ? (Guid?)slid : null;
 
         var response = editingAssetId is null
-            ? await Http.PostAsJsonAsync("api/assets", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes))
-            : await Http.PutAsJsonAsync($"api/assets/{editingAssetId}", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes));
+            ? await Http.PostAsJsonAsync("api/assets", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes, assetBarcode, assetManualUrl))
+            : await Http.PutAsJsonAsync($"api/assets/{editingAssetId}", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes, assetBarcode, assetManualUrl));
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingAssetId = null;

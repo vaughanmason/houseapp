@@ -943,6 +943,49 @@ public sealed class InventoryValidationTests
         }
     }
 
+    [Fact]
+    public async Task AssetBarcodeAndManual_SaveSearchAndRoundTrip()
+    {
+        InventoryExport backup;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            var created = await source.PostAsJsonAsync("/api/assets", new AssetInput(property.Id, null, null, "Kettle", "Kitchen", null, null, null, null, null, null, null, null, null, " 6001234567890 ", "https://example.com/kettle.pdf"));
+            var kettle = (await created.Content.ReadFromJsonAsync<AssetDto>())!;
+            Assert.Equal(("6001234567890", "https://example.com/kettle.pdf"), (kettle.Barcode, kettle.ManualUrl));
+            Assert.Equal("Kettle", Assert.Single((await source.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=600123"))!).Title);
+            backup = (await source.GetFromJsonAsync<InventoryExport>("/api/export"))!;
+        }
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        await target.PostAsJsonAsync("/api/import/confirm", new { inventory = backup, skipExternalIds = new List<string>() });
+        var restored = Assert.Single((await target.GetFromJsonAsync<List<AssetDto>>("/api/assets?archived=false"))!);
+        Assert.Equal(("6001234567890", "https://example.com/kettle.pdf"), (restored.Barcode, restored.ManualUrl));
+    }
+
+    [Fact]
+    public async Task Import_ConvertsLegacyFixtureMaintenanceTextIntoTasks()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        // An older backup: fixtures still carried free-text maintenance fields and there were no maintenance tasks.
+        var legacy = new InventoryExport(1,
+            [new ImportProperty("p", "Home", null, null, null, null, null)],
+            [new ImportFloor("f", "p", "Ground", null)],
+            [new ImportRoom("r", "f", "Kitchen", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)],
+            [], [], [], [],
+            [new ImportFixture("geyser", "r", "Geyser", "Geyser", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "Every 2 years", new DateOnly(2025, 3, 1)),
+             new ImportFixture("sink", "r", "Sink", "Sink", null, null, null, null, null, null, null, null, null, null, null, null)]);
+
+        for (var attempt = 0; attempt < 2; attempt++)
+            Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/import/confirm", new { inventory = legacy, skipExternalIds = new List<string>() })).StatusCode);
+
+        var task = Assert.Single((await client.GetFromJsonAsync<List<MaintenanceTaskDto>>("/api/maintenance"))!);
+        Assert.Equal(("Service: Geyser", "Every 2 years", new DateOnly(2025, 3, 1), "Geyser"), (task.Title, task.Notes, task.LastCompletedOn, task.FixtureName));
+    }
+
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
@@ -967,7 +1010,7 @@ public sealed class InventoryValidationTests
         new(roomId, name, type, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 0);
 
     private static FixtureInput FixtureFor(Guid roomId) =>
-        new(roomId, "Sink", "Sink", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        new(roomId, "Sink", "Sink", null, null, null, null, null, null, null, null, null, null, null, null);
 
     private static async Task<PropertyDto> CreatePropertyAsync(HttpClient client, string name = "Main House")
     {
