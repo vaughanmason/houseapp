@@ -10,7 +10,7 @@ dotnet test .\HomeInventory.Tests
 dotnet test .\HomeInventory.Tests --filter "FullyQualifiedName~CreateAsset_AndArchive"
 ```
 
-The server launch profile uses `https://localhost:7060` and `http://localhost:5068`. Tests are xUnit HTTP integration tests in `HomeInventory.Tests` using `CustomWebApplicationFactory` (shared in-memory SQLite). There is no linter or CI configured.
+The server launch profile uses `https://localhost:7060` and `http://localhost:5068`. Tests are xUnit HTTP integration tests in `HomeInventory.Tests` using `CustomWebApplicationFactory` (shared in-memory SQLite). CI in `.github/workflows/ci.yml` builds with `-warnaserror` and runs the tests.
 
 ## Architecture
 

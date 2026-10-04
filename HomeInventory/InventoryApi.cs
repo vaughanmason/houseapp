@@ -9,7 +9,6 @@ public static class InventoryApi
     public static RouteGroupBuilder MapInventoryApi(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api");
-        // TODO: Add endpoint groups for floors, room surfaces/fixtures, maintenance, utilities, paint, documents, and photos.
         api.MapGet("/properties", async (InventoryDbContext db) => await db.Properties.OrderBy(x => x.Name).Select(x => ToDto(x)).ToListAsync());
         api.MapPost("/properties", async (PropertyInput input, InventoryDbContext db) =>
         {

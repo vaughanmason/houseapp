@@ -53,19 +53,17 @@ None open.
 
 ## Tech debt and housekeeping
 
-- Stale TODO at the top of `MapInventoryApi`: floors, surfaces, fixtures, paint and photos are done.
-- Template leftovers: `Pages/Counter.razor`, `Pages/Weather.razor`, `HomeInventory.Tests/UnitTest1.cs`.
 - `Room.FloorId` is still nullable even though every room needs a floor. `Room.PropertyId` is denormalized from the floor and has to be kept in sync by the API.
 - `/api/search` and the asset/fixture DTO helpers load whole tables into memory. That's fine at household scale, but it won't scale.
 - `AssetDtos`, `ValidateAsset` and the import confirm handler are still dense one-liners. Split them when you touch them.
 - Test coverage: 17 tests now, but nothing yet covers surfaces, paints CRUD, search, or the property/room photo endpoints.
-- No CI pipeline, no `.editorconfig`, no analyzers.
+- No `.editorconfig` or extra analyzers.
 - The product plan suggests Flutter/offline-first and cloud sync. The current implementation is Blazor WASM, local-only. That needs a deliberate decision before multi-device work starts.
 
-Resolved: the model snapshot and the `dotnet-ef` local tool were added, the unused server `FormatMoney` and the duplicate on the Home page were removed, the CS8602 warning was fixed (the build is warning-free), `Export`/`Preview` were made readable, and `.github/copilot-instructions.md` was brought up to date.
+Resolved: the template pages, placeholder test and stale TODO were removed, GitHub Actions CI was added (build with `-warnaserror` + tests), the model snapshot and the `dotnet-ef` local tool were added, the unused server `FormatMoney` and the duplicate on the Home page were removed, the CS8602 warning was fixed (the build is warning-free), `Export`/`Preview` were made readable, and `.github/copilot-instructions.md` was brought up to date.
 
 ## Suggested order
 
-1. Tidy up: remove the template pages, `UnitTest1.cs` and the stale TODO, and add CI running `dotnet build` + `dotnet test`.
+1. ~~Tidy-up and CI~~ (done).
 2. Close the P2 UI gaps (surface edit, room photos, storage rename/move, asset move) and decide on the import de-duplication scope for non-asset entities.
 3. Then start new modules. Maintenance (10) and Documents/file storage (8/9) unlock most of the dashboard goals.
