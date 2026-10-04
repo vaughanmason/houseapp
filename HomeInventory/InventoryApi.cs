@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http.Features;
 using HomeInventory.Client;
 using Microsoft.EntityFrameworkCore;
 
@@ -741,6 +743,61 @@ public static class InventoryApi
         });
 
         api.MapGet("/export", async (InventoryDbContext db) => Results.Ok(await Export(db)));
+        // Full backup: inventory.json plus every uploaded file it references, so photos and documents survive a restore.
+        api.MapGet("/backup", async (InventoryDbContext db, FileStore store) =>
+        {
+            var inventory = await Export(db);
+            var keys = await StoredFileKeys(db);
+            var temp = new FileStream(System.IO.Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+            using (var zip = new ZipArchive(temp, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                await using (var json = zip.CreateEntry("inventory.json", CompressionLevel.Optimal).Open())
+                    await JsonSerializer.SerializeAsync(json, inventory, BackupJson);
+                foreach (var key in keys)
+                {
+                    await using var source = store.Open(key);
+                    if (source is null) continue; // referenced but missing on disk: the metadata is still backed up
+                    await using var entry = zip.CreateEntry($"files/{key}", CompressionLevel.NoCompression).Open(); // images and PDFs are already compressed
+                    await source.CopyToAsync(entry);
+                }
+            }
+            temp.Position = 0;
+            return Results.File(temp, "application/zip", $"home-inventory-backup-{DateTime.Now:yyyy-MM-dd}.zip");
+        });
+        // Restores the files from a backup ZIP and returns its inventory for the usual preview/confirm steps.
+        api.MapPost("/import/zip", async (HttpContext context, FileStore store) =>
+        {
+            var sizeLimit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (sizeLimit is { IsReadOnly: false }) sizeLimit.MaxRequestBodySize = MaxBackupBytes;
+            await using var temp = new FileStream(System.IO.Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+            await context.Request.Body.CopyToAsync(temp);
+            if (temp.Length > MaxBackupBytes) return Results.BadRequest("Backups must be 1 GB or smaller.");
+            temp.Position = 0;
+            ZipArchive zip;
+            try { zip = new ZipArchive(temp, ZipArchiveMode.Read); }
+            catch (InvalidDataException) { return Results.BadRequest("That file is not a valid backup ZIP."); }
+            using (zip)
+            {
+                var jsonEntry = zip.GetEntry("inventory.json");
+                if (jsonEntry is null || jsonEntry.Length > 200 * 1024 * 1024) return Results.BadRequest("The backup ZIP has no inventory.json.");
+                InventoryExport? inventory;
+                try
+                {
+                    await using var json = jsonEntry.Open();
+                    inventory = await JsonSerializer.DeserializeAsync<InventoryExport>(json, BackupJson);
+                }
+                catch (JsonException) { return Results.BadRequest("The backup's inventory.json is not valid."); }
+                if (inventory is null) return Results.BadRequest("The backup's inventory.json is empty.");
+                int restored = 0, skipped = 0;
+                // Only entries named files/<valid key> are considered, so crafted paths can't escape the files folder.
+                foreach (var entry in zip.Entries.Where(x => x.FullName.StartsWith("files/")))
+                {
+                    await using var content = entry.Open();
+                    if (await store.RestoreAsync(entry.FullName["files/".Length..], content, entry.Length)) restored++; else skipped++;
+                }
+                return Results.Ok(new ZipImportDto(inventory, restored, skipped));
+            }
+        });
         api.MapPost("/import/preview", async (InventoryExport import, InventoryDbContext db) => Results.Ok(await Preview(import, db)));
         api.MapPost("/import/confirm", async (ImportConfirmation confirmation, InventoryDbContext db) =>
         {
@@ -899,6 +956,17 @@ public static class InventoryApi
         return api;
     }
 
+    const long MaxBackupBytes = 1L << 30;
+    static readonly JsonSerializerOptions BackupJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    static async Task<List<string>> StoredFileKeys(InventoryDbContext db)
+    {
+        var keys = await db.Documents.Select(x => x.StorageKey).ToListAsync();
+        keys.AddRange(await db.PropertyPhotos.Select(x => x.StorageKey).ToListAsync());
+        keys.AddRange(await db.RoomPhotos.Select(x => x.StorageKey).ToListAsync());
+        keys.AddRange(await db.FixturePhotos.Select(x => x.StorageKey).ToListAsync());
+        keys.AddRange(await db.AssetPhotos.Select(x => x.StorageKey).ToListAsync());
+        return keys.Where(FileStore.IsStoredKey).Distinct().ToList();
+    }
     public sealed record ImportConfirmation(InventoryExport Inventory, List<string> SkipExternalIds);
     static PropertyDto ToDto(Property x) => new(x.Id, x.Name, x.Address, x.PurchaseDate, x.PurchasePrice, x.FloorArea, x.Notes, x.Currency);
     static FixtureDto ToDto(Fixture x, string? locationPath) => new(x.Id, x.RoomId, x.Name, x.Type, x.Manufacturer, x.Model, x.SerialNumber, x.PurchaseDate, x.PurchasePrice, x.CurrentValue, x.Warranty, x.ManualUrl, x.InstallerName, x.InstallationDate, x.MaintenanceSchedule, x.LastMaintenanceDate, x.Condition, x.Notes, locationPath);

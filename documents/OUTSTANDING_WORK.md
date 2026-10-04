@@ -32,7 +32,7 @@ None open.
 - **Reusable components**: `Breadcrumb` isn't used on any page. `PropertySelector`/`ConfirmDialog` are used only on some pages.
 - **Fixtures/assets** can't be moved between properties from the UI except through the asset edit form.
 
-Resolved on 2026-10-04: property delete (blocked while it has assets, with a typed-name confirm), surface add/edit with type-specific fields, room photo UI, storage location rename/re-parent, the asset Move picker, the "Used in" paint view (`GET /api/paints/{id}/usage`), search over paints and surfaces, and a Rooms-page bug where saving a room wiped its paint details. Also resolved: document and photo uploads (FileStore, Documents page, shared PhotoManager, warranty/receipt dashboard counts), the Maintenance module (tasks, service history, dashboard counts, backup support), a guard stopping rooms that hold assets from moving to another property, and idempotent imports (`ExternalId` on every importable entity, migration `AddExternalIdsToImportedEntities`), and storage locations import in any order, with missing parents and cycles rejected.
+Resolved on 2026-10-04: property delete (blocked while it has assets, with a typed-name confirm), surface add/edit with type-specific fields, room photo UI, storage location rename/re-parent, the asset Move picker, the "Used in" paint view (`GET /api/paints/{id}/usage`), search over paints and surfaces, and a Rooms-page bug where saving a room wiped its paint details. Also resolved: full ZIP backup and restore including uploaded files, document and photo uploads (FileStore, Documents page, shared PhotoManager, warranty/receipt dashboard counts), the Maintenance module (tasks, service history, dashboard counts, backup support), a guard stopping rooms that hold assets from moving to another property, and idempotent imports (`ExternalId` on every importable entity, migration `AddExternalIdsToImportedEntities`), and storage locations import in any order, with missing parents and cycles rejected.
 
 ## P3 – Planned modules not yet started (from the product plan)
 
@@ -52,7 +52,7 @@ Resolved on 2026-10-04: property delete (blocked while it has assets, with a typ
 
 - `Room.FloorId` is still nullable even though every room needs a floor. `Room.PropertyId` is denormalized from the floor and has to be kept in sync by the API.
 - Fixtures still have free-text `MaintenanceSchedule`/`LastMaintenanceDate` fields from before the Maintenance module. Consider migrating them into tasks and removing them.
-- Backups don't include uploaded files. Users must copy `%LOCALAPPDATA%\HomeInventory\files` themselves. A ZIP backup (JSON plus files) would close this gap.
+- ZIP backups are buffered in browser memory when restoring (Blazor WASM uploads), so very large backups (hundreds of MB) may be slow.
 - Files uploaded but never attached (form abandoned) stay on disk, so a periodic orphan sweep would reclaim them.
 - No image thumbnails are generated; full-size images are scaled in the browser. HEIC photos can be stored but most browsers can't display them.
 - Maintenance service records can't carry photos directly. Attach a document to the task instead.
@@ -60,7 +60,7 @@ Resolved on 2026-10-04: property delete (blocked while it has assets, with a typ
 - Most nav-menu icon classes (`bi-tools-nav-menu`, `bi-palette-nav-menu`, and others) have no CSS rule, so those menu items show no icon. Only house, list, plus and calendar are defined in `NavMenu.razor.css`.
 - `/api/search` and the asset/fixture DTO helpers load whole tables into memory. That's fine at household scale, but it won't scale.
 - `AssetDtos`, `ValidateAsset` and the import confirm handler are still dense one-liners. Split them when you touch them.
-- Test coverage: 31 API tests. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
+- Test coverage: 33 API tests. Nothing yet covers paint CRUD or the property/room photo endpoints, and there are no UI (bUnit/Playwright) tests.
 - No `.editorconfig` or extra analyzers.
 - The product plan suggests Flutter/offline-first and cloud sync. The current implementation is Blazor WASM, local-only. That needs a deliberate decision before multi-device work starts.
 

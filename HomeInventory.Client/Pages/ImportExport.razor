@@ -4,7 +4,108 @@
 
 <PageTitle>Import & backup</PageTitle>
 <h1>Import & backup</h1>
-<div class="row g-4"><div class="col-lg-6"><div class="card card-body"><h2 class="h4">Backup</h2><p>Download a complete JSON copy of your active inventory. Keep it somewhere safe.</p><button class="btn btn-primary" @onclick="Export">Download backup</button></div></div><div class="col-lg-6"><div class="card card-body"><h2 class="h4">Import AI-generated JSON</h2><p>Ask ChatGPT to produce the documented schema, select its JSON file, review the preview, then confirm.</p><InputFile OnChange="ReadFile" accept="application/json,.json" />@if(preview is not null){<div class="mt-3"><strong>@(preview.IsValid ? "Ready to import" : "Fix the file first")</strong><p>@preview.Properties properties · @preview.Floors floors · @preview.Rooms rooms · @preview.Surfaces surfaces · @preview.Fixtures fixtures · @preview.StorageLocations locations · @preview.Assets assets · @preview.Paints paints · @preview.Photos photos</p>@foreach(var error in preview.Errors){<p class="text-danger">@error</p>}@if(preview.ExistingRecords>0){<p class="text-warning">@preview.ExistingRecords record(s) are already in your inventory (matched by backup ID) and will be skipped. Only new records are added.</p>}@if(preview.IsValid){<button class="btn btn-success" @onclick="Confirm">Import reviewed records</button>}</div>}</div></div></div>
-<h2 class="h4 mt-4">JSON contract</h2><p>Use <code>schemaVersion: 1</code> and arrays named <code>properties</code>, <code>floors</code>, <code>rooms</code>, <code>surfaces</code>, <code>storageLocations</code>, <code>assets</code> and <code>propertyPhotos</code>, plus the optional <code>fixtures</code>, <code>assetPhotos</code>, <code>paints</code>, <code>roomPaints</code>, <code>roomPhotos</code>, <code>fixturePhotos</code>, <code>maintenanceTasks</code>, <code>maintenanceRecords</code> and <code>documents</code>. The backup holds document and photo <em>details</em>, not the files themselves: copy the <code>%LOCALAPPDATA%\HomeInventory\files</code> folder alongside it. Imported paints that match an existing paint (brand, colour name and code) are reused, not duplicated. Every record needs a unique <code>externalId</code>; child records reference their parent using the relevant <code>*ExternalId</code> property. Export an empty backup to get a valid example.</p>
-@if(message is not null){<p class="alert alert-info mt-3">@message</p>}
-@code {InventoryExport? inventory;ImportPreviewDto? preview;string? message;async Task ReadFile(InputFileChangeEventArgs e){try{using var stream=e.File.OpenReadStream(5_000_000);inventory=await JsonSerializer.DeserializeAsync<InventoryExport>(stream,new JsonSerializerOptions(JsonSerializerDefaults.Web));if(inventory is null){message="That file did not contain inventory JSON.";return;}var response=await Http.PostAsJsonAsync("api/import/preview",inventory);preview=await response.Content.ReadFromJsonAsync<ImportPreviewDto>();message=null;}catch(Exception ex){message=$"Could not read the file: {ex.Message}";}}async Task Confirm(){if(inventory is null)return;var skipped=preview?.DuplicateExternalIds.ToList()??[];var response=await Http.PostAsJsonAsync("api/import/confirm",new {inventory,skipExternalIds=skipped});message=response.IsSuccessStatusCode?"Import complete.":await response.Content.ReadAsStringAsync();}async Task Export(){var json=await Http.GetStringAsync("api/export");await Js.InvokeVoidAsync("downloadText", "home-inventory-backup.json", json);}}
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">Backup</h2>
+            <p>The <strong>full backup</strong> is a ZIP holding your inventory and every uploaded photo and document. Keep it somewhere safe.</p>
+            <div>
+                <a class="btn btn-primary" href="api/backup" download>Download full backup (ZIP)</a>
+                <button class="btn btn-outline-secondary ms-2" @onclick="ExportJson">Data only (JSON)</button>
+            </div>
+            <p class="small text-muted mt-2 mb-0">The JSON file contains the records but not the uploaded files.</p>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card card-body">
+            <h2 class="h4">Restore or import</h2>
+            <p>Choose a backup ZIP, a backup JSON, or AI-generated JSON in the documented schema. Review the preview, then confirm. Records you already have are skipped.</p>
+            <InputFile OnChange="ReadFile" accept=".zip,application/zip,application/json,.json" disabled="@busy" />
+            @if (busy) { <div class="small text-muted mt-2">Reading the file…</div> }
+            @if (preview is not null)
+            {
+                <div class="mt-3">
+                    <strong>@(preview.IsValid ? "Ready to import" : "Fix the file first")</strong>
+                    <p>
+                        @preview.Properties properties · @preview.Floors floors · @preview.Rooms rooms · @preview.Surfaces surfaces · @preview.Fixtures fixtures ·
+                        @preview.StorageLocations locations · @preview.Assets assets · @preview.Paints paints · @preview.Photos photos ·
+                        @preview.MaintenanceTasks maintenance tasks · @preview.Documents documents
+                    </p>
+                    @foreach (var error in preview.Errors) { <p class="text-danger">@error</p> }
+                    @if (preview.ExistingRecords > 0) { <p class="text-warning">@preview.ExistingRecords record(s) are already in your inventory (matched by backup ID) and will be skipped. Only new records are added.</p> }
+                    @if (preview.IsValid) { <button class="btn btn-success" @onclick="Confirm">Import reviewed records</button> }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<h2 class="h4 mt-4">JSON contract</h2>
+<p>
+    Use <code>schemaVersion: 1</code> and arrays named <code>properties</code>, <code>floors</code>, <code>rooms</code>, <code>surfaces</code>, <code>storageLocations</code>, <code>assets</code> and <code>propertyPhotos</code>,
+    plus the optional <code>fixtures</code>, <code>assetPhotos</code>, <code>paints</code>, <code>roomPaints</code>, <code>roomPhotos</code>, <code>fixturePhotos</code>, <code>maintenanceTasks</code>, <code>maintenanceRecords</code> and <code>documents</code>.
+    Every record needs a unique <code>externalId</code>; child records reference their parent using the relevant <code>*ExternalId</code> property.
+    Imported paints that match an existing paint (brand, colour name and code) are reused, not duplicated. Download a data-only backup of an empty inventory to get a valid example.
+</p>
+@if (message is not null) { <p class="alert alert-info mt-3">@message</p> }
+
+@code {
+    const long MaxZipBytes = 1L << 30;
+    InventoryExport? inventory;
+    ImportPreviewDto? preview;
+    string? message;
+    bool busy;
+
+    async Task ReadFile(InputFileChangeEventArgs e)
+    {
+        message = null;
+        preview = null;
+        busy = true;
+        try
+        {
+            if (e.File.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                if (e.File.Size > MaxZipBytes) { message = "Backups must be 1 GB or smaller."; return; }
+                var content = new StreamContent(e.File.OpenReadStream(MaxZipBytes));
+                content.Headers.ContentType = new("application/zip");
+                var upload = await Http.PostAsync("api/import/zip", content);
+                if (!upload.IsSuccessStatusCode) { message = await upload.Content.ReadAsStringAsync(); return; }
+                var result = (await upload.Content.ReadFromJsonAsync<ZipImportDto>())!;
+                inventory = result.Inventory;
+                message = $"{result.FilesRestored} file(s) restored from the backup" + (result.FilesSkipped > 0 ? $", {result.FilesSkipped} skipped (already present or not a valid image/PDF)." : ".");
+            }
+            else
+            {
+                using var stream = e.File.OpenReadStream(200_000_000);
+                inventory = await JsonSerializer.DeserializeAsync<InventoryExport>(stream, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                if (inventory is null) { message = "That file did not contain inventory JSON."; return; }
+            }
+            var response = await Http.PostAsJsonAsync("api/import/preview", inventory);
+            preview = await response.Content.ReadFromJsonAsync<ImportPreviewDto>();
+        }
+        catch (Exception ex)
+        {
+            message = $"Could not read the file: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    async Task Confirm()
+    {
+        if (inventory is null) return;
+        var skipped = preview?.DuplicateExternalIds.ToList() ?? [];
+        var response = await Http.PostAsJsonAsync("api/import/confirm", new { inventory, skipExternalIds = skipped });
+        message = response.IsSuccessStatusCode ? "Import complete." : await response.Content.ReadAsStringAsync();
+        if (response.IsSuccessStatusCode) preview = null;
+    }
+
+    async Task ExportJson()
+    {
+        var json = await Http.GetStringAsync("api/export");
+        await Js.InvokeVoidAsync("downloadText", "home-inventory-backup.json", json);
+    }
+}

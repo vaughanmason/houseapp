@@ -62,6 +62,7 @@ The application uses a multi-page, component-based architecture to organize func
 | Rooms | GET by floor/property, POST, PUT/{id}, DELETE | Rooms now live under floors |
 | Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
 | RoomPhotos | GET/POST/PUT/DELETE under `/rooms/{roomId}/photos` | External photo references for rooms |
+| Backup | GET `/backup` (ZIP), GET `/export` (JSON), POST `/import/zip`, POST `/import/preview`, POST `/import/confirm` | ZIP restore puts files back, then returns the inventory for preview/confirm |
 | Search | GET `/search?q=` | Assets, fixtures, storage, paints, surfaces (max 50 results) |
 | Paints (library) | GET/POST/PUT/DELETE paints; `paints/{id}/usage`; `rooms/{roomId}/paints` assign colours to rooms | Usage combines assignments with painted surfaces matching the colour code, or the colour name and brand |
 | StorageLocations | GET by property, POST/PUT tree edits, DELETE (empty leaf only) | Self-referencing hierarchy scoped per property; cycles rejected |
@@ -103,6 +104,6 @@ ImportPreviewDto {
 }
 ```
 
-Backups contain document and photo details, not the files themselves: copy `%LOCALAPPDATA%\HomeInventory\files` alongside the JSON to keep them.
+The **full backup** (`GET /api/backup`) is a ZIP of `inventory.json` plus every uploaded file it references. Restoring it (`POST /api/import/zip`, raw ZIP body up to 1 GB) puts the files back (only valid keys whose contents match their type, skipping files you already have) and returns the inventory for the usual preview/confirm. The data-only JSON (`GET /api/export`) leaves the files out.
 
 All import/export records are linked by external IDs rather than database IDs, and the confirmation step imports inside a transaction after preview validation. Every imported record remembers its backup ID, and exports reuse it. Restoring the same backup twice changes nothing, and restoring a newer backup only adds what is new. Storage locations may appear in any order. Property imports can optionally include a `currency` field (3-letter ISO code); when omitted, the app defaults to `USD`.

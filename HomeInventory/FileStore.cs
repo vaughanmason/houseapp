@@ -59,6 +59,28 @@ public sealed partial class FileStore(string rootPath)
         return (key, null);
     }
 
+    /// <summary>
+    /// Writes a file from a backup under its original key. Returns false (and writes nothing) when the key is invalid,
+    /// the file already exists, it is too large, or its contents don't match the key's file type.
+    /// </summary>
+    public async Task<bool> RestoreAsync(string key, Stream content, long length)
+    {
+        if (!IsStoredKey(key) || File.Exists(FullPath(key)) || length <= 0 || length > MaxBytes) return false;
+        var header = new byte[16];
+        var read = await content.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false);
+        if (Sniff(header.AsSpan(0, read)) != Path.GetExtension(key)) return false;
+        var path = FullPath(key);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using (var file = File.Create(path))
+        {
+            await file.WriteAsync(header.AsMemory(0, read));
+            await content.CopyToAsync(file);
+            if (file.Length <= MaxBytes) return true;
+        }
+        File.Delete(path);
+        return false;
+    }
+
     public Stream? Open(string key) => IsStoredKey(key) && File.Exists(FullPath(key)) ? File.OpenRead(FullPath(key)) : null;
 
     public void Delete(string key)

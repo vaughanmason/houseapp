@@ -689,6 +689,71 @@ public sealed class InventoryValidationTests
         Assert.Equal("Asset: TV", Assert.Single(documents, x => x.Kind == "Manual").AttachedTo);
     }
 
+    [Fact]
+    public async Task ZipBackup_RestoresFilesAndRecordsIntoFreshInventory()
+    {
+        byte[] zipBytes;
+        UploadedFileDto photo, manual;
+        using (var sourceFactory = new CustomWebApplicationFactory())
+        using (var source = CreateClient(sourceFactory))
+        {
+            var property = await CreatePropertyAsync(source);
+            photo = await UploadAsync(source, PngBytes, "front.png");
+            manual = await UploadAsync(source, PdfBytes, "manual.pdf");
+            await source.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput(photo.StorageKey, "Front", 0));
+            await source.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput("C:/elsewhere/old.jpg", "External", 1));
+            await source.PostAsJsonAsync("/api/documents", new DocumentInput(property.Id, null, null, null, null, "Manual", "Manual", manual.StorageKey, null, null, null, null, null, null, null));
+            var response = await source.GetAsync("/api/backup");
+            Assert.Equal("application/zip", response.Content.Headers.ContentType?.MediaType);
+            zipBytes = await response.Content.ReadAsByteArrayAsync();
+        }
+        using (var zip = new System.IO.Compression.ZipArchive(new MemoryStream(zipBytes)))
+            Assert.Equal(["files/" + manual.StorageKey, "files/" + photo.StorageKey, "inventory.json"], zip.Entries.Select(x => x.FullName).Order());
+
+        using var targetFactory = new CustomWebApplicationFactory();
+        using var target = CreateClient(targetFactory);
+        var restore = await target.PostAsync("/api/import/zip", new ByteArrayContent(zipBytes));
+        Assert.Equal(HttpStatusCode.OK, restore.StatusCode);
+        var result = (await restore.Content.ReadFromJsonAsync<ZipImportDto>())!;
+        Assert.Equal(2, result.FilesRestored);
+        Assert.Equal(HttpStatusCode.NoContent, (await target.PostAsJsonAsync("/api/import/confirm", new { inventory = result.Inventory, skipExternalIds = new List<string>() })).StatusCode);
+
+        Assert.Equal(PngBytes, await target.GetByteArrayAsync($"/api/files/{photo.StorageKey}"));
+        Assert.Equal(PdfBytes, await target.GetByteArrayAsync($"/api/files/{manual.StorageKey}"));
+        Assert.Equal(2, (await target.GetFromJsonAsync<List<PhotoMetadataDto>>($"/api/properties/{Assert.Single((await target.GetFromJsonAsync<List<PropertyDto>>("/api/properties"))!).Id}/photos"))!.Count);
+
+        // Restoring the same ZIP again skips files that already exist.
+        var again = (await (await target.PostAsync("/api/import/zip", new ByteArrayContent(zipBytes))).Content.ReadFromJsonAsync<ZipImportDto>())!;
+        Assert.Equal((0, 2), (again.FilesRestored, again.FilesSkipped));
+    }
+
+    [Fact]
+    public async Task ZipRestore_IgnoresUnsafeOrDisguisedEntries()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var goodKey = $"2026/01/{Guid.NewGuid():N}.png";
+        var disguisedKey = $"2026/01/{Guid.NewGuid():N}.png";
+        var stream = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            void Add(string name, byte[] bytes) { using var entry = zip.CreateEntry(name).Open(); entry.Write(bytes); }
+            Add("inventory.json", System.Text.Encoding.UTF8.GetBytes("""{"schemaVersion":1,"properties":[],"floors":[],"rooms":[],"surfaces":[],"storageLocations":[],"assets":[],"propertyPhotos":[]}"""));
+            Add("files/" + goodKey, PngBytes);
+            Add("files/" + disguisedKey, "<html>not an image</html>"u8.ToArray());
+            Add("files/../../escape.png", PngBytes);
+            Add("files/2026/01/notakey.png", PngBytes);
+        }
+
+        var result = (await (await client.PostAsync("/api/import/zip", new ByteArrayContent(stream.ToArray()))).Content.ReadFromJsonAsync<ZipImportDto>())!;
+
+        Assert.Equal((1, 3), (result.FilesRestored, result.FilesSkipped));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/files/{goodKey}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/files/{disguisedKey}")).StatusCode);
+        Assert.False(File.Exists(Path.Combine(factory.FilesPath, "..", "escape.png")));
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/import/zip", new ByteArrayContent("not a zip"u8.ToArray()))).StatusCode);
+    }
+
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
