@@ -14,6 +14,18 @@ dotnet test .\HomeInventory.Tests
 
 Open the localhost URL shown by the application. The database lives in `%LOCALAPPDATA%\HomeInventory\inventory.db`; it is intentionally outside the repository. If you want a clean slate when upgrading from earlier builds, delete that file and restart the app—the app will recreate it and apply the latest migrations.
 
+## Optional setup
+
+**Use it from your phone (network access).** Open *Network access* in the menu on the Home Inventory computer, turn it on, set a PIN and restart the app. The page then shows the address (and a QR code) to open on your phone. The first time, Windows asks whether to allow the app through the firewall: choose **Private networks**. This computer never needs the PIN; other devices enter it once and stay signed in for 30 days. Only home-network addresses are accepted. The app is never reachable from the internet.
+
+**AI features (receipt reading, "Fill from photo").** These use Claude (`claude-opus-5-5`) and need your own Anthropic API key from [console.anthropic.com](https://console.anthropic.com). Set it once and restart the app:
+
+```powershell
+setx ANTHROPIC_API_KEY "sk-ant-..."   # or add "Anthropic": { "ApiKey": "..." } to HomeInventory/appsettings.Development.json (don't commit it)
+```
+
+Without a key the AI buttons stay hidden and everything else works. Typical cost is roughly US$0.01-0.03 per receipt or photo (Opus 5.5 is billed at $4 per million input tokens and $20 per million output tokens).
+
 ## What’s implemented
 
 - Properties with address/purchase metadata and a configurable property-level currency (USD, EUR, GBP, etc.)
@@ -28,6 +40,10 @@ Open the localhost URL shown by the application. The database lives in `%LOCALAP
 - Maintenance tasks for a property or one of its fixtures/utilities: one-off or repeating every N days/months/years, with service history (date, cost, supplier, notes) and automatic next-due dates
 - Photo uploads (with thumbnails) on properties, rooms, fixtures and assets; links to externally stored files still work
 - Documents (receipts, invoices, manuals, warranties, insurance, certificates, plans) uploaded as images or PDFs, attached to a property, room, fixture, asset or maintenance task, with dates, expiry, tags and notes
+- Thumbnails for uploaded photos (generated on first view, cached, location metadata stripped); iPhone HEIC photos are converted to JPEG on upload ([Magick.NET](https://github.com/dlemstra/Magick.NET), Apache-2.0)
+- Barcode/QR scanning from a photo: the **Scan** buttons open the phone camera and the server reads the code ([ZXing.Net](https://github.com/micjahn/ZXing.Net), Apache-2.0). Use it to fill an asset's barcode or to search by barcode
+- AI (optional, needs an API key): **Read with AI** on receipts/invoices/warranties extracts the merchant, date, total, items and warranty, saves the text so search finds the document by its contents, and can apply the date and price to the attached asset; **Fill from photo** on the Assets page suggests name, category, brand, model and value
+- Network access for phones and other home-network devices, behind a shared PIN
 - Uploaded files live in `%LOCALAPPDATA%\HomeInventory\files` (images and PDFs only, 20 MB max, type checked from the file contents)
 - Dashboard summary metrics, category totals grouped by property currency, overdue / due-in-30-days maintenance, warranties expiring within 90 days, active assets missing a receipt, recent purchases, and how completely rooms are documented
 - Insurance report: a printable schedule per property (in its currency) with totals by category and every active asset and fixture, including value, serial, location, photo count and whether a receipt is on file. Print it or save it as PDF from the browser
@@ -52,6 +68,7 @@ The application uses a multi-page, component-based architecture to organize func
 | **Insurance report** | Printable insurance schedule | Property filter, totals, itemised table, Print / Save as PDF (print styles hide the app chrome) |
 | **QR labels** | Printable labels | Choose a property, select locations/assets, print a 3-per-row label sheet; labels open `/scan/location/{id}` or `/scan/asset/{id}` |
 | **Contacts** | Supplier and installer directory | Add/edit/delete with phone, email and website links; filter by kind |
+| **Network access** | Phone and home-network access | Turn on/off, set the PIN and port, see the addresses and QR codes to open on other devices (this computer only) |
 | **Paints** | Paint library and assignments | Global paint registry, assign colours to rooms, "Used in" view listing every room using a paint |
 | **Assets & Storage** | Assets and storage organization | Asset catalog with valuation, Move picker, archive/unarchive with an archived view; nested storage locations with edit/re-parent; photo management |
 
@@ -74,6 +91,9 @@ The application uses a multi-page, component-based architecture to organize func
 | Surfaces | GET/POST under `/rooms/{roomId}/surfaces`, PUT/DELETE via `/surfaces/{id}` | Surface type metadata is stored per room |
 | RoomPhotos | GET/POST/PUT/DELETE under `/rooms/{roomId}/photos` | External photo references for rooms |
 | Backup | GET `/backup` (ZIP), GET `/export` (JSON), POST `/import/zip`, POST `/import/preview`, POST `/import/confirm` | ZIP restore puts files back, then returns the inventory for preview/confirm |
+| Barcode | POST `/barcode` (multipart image) | Reads a barcode or QR code from a photo; 404 when none is found |
+| AI | GET `/ai/status`, POST `/ai/receipt/{documentId}`, POST `/documents/{id}/apply-receipt`, POST `/ai/identify?currency=` (multipart image) | 503 when no API key is configured; nothing is saved by `/ai/identify` |
+| Network | GET/PUT `/network` (this computer only), GET/POST `/pin` | PIN sign-in page for home-network devices |
 | QR | GET `/qr?text=` | SVG QR code (text up to 512 characters), used by the labels page |
 | Reports | GET `/reports/insurance?propertyId=` | Insurance schedule per property; active assets and fixtures only |
 | Search | GET `/search?q=` | Assets, fixtures, storage, paints, surfaces, documents, contacts (max 50 results) |
@@ -85,7 +105,7 @@ The application uses a multi-page, component-based architecture to organize func
 | Assets | GET list/filter (`archived=true/false`), GET/{id}, POST, PUT, move, archive/unarchive (no hard delete), photo CRUD | Cross-entity validation is enforced for property/floor/room references |
 | Fixtures | GET/POST/PUT/DELETE under `/rooms/{roomId}/fixtures` and `/fixtures` (`category=Fixture\|Utility` filter) | Room-scoped permanent items; `category`, `provider` and `accountNumber` describe utilities |
 | Maintenance | GET (`propertyId`, `fixtureId` filters), POST, PUT/{id}, DELETE/{id}, POST `/{id}/complete`, GET `/{id}/history` | Task belongs to a property and optionally one of its fixtures; completing sets the next due date from the completion date |
-| Files | POST `/files` (multipart `file`), GET `/files/{key}` | Images (JPEG/PNG/GIF/WebP/HEIC) and PDFs up to 20 MB; returns a storage key for photos and documents |
+| Files | POST `/files` (multipart `file`), GET `/files/{key}` (`?size=thumb` for a 360 px JPEG) | Images (JPEG/PNG/GIF/WebP/HEIC) and PDFs up to 20 MB; returns a storage key for photos and documents |
 | Documents | GET (property/room/fixture/asset/task/kind filters), POST, PUT/{id}, DELETE/{id} | Attached to at most one target in the same property; deleting the target keeps the document at property level |
 | FixturePhotos | GET/POST/DELETE under `/fixtures/{id}/photos` | External photo references for fixtures |
 | AssetHistory | GET `/assets/{id}/history`, POST `/assets/{id}/events`, DELETE `/assets/{id}/events/{eventId}` | Manual kinds only (Repaired, Serviced, Valued, Note); automatic events can't be added or removed by hand |

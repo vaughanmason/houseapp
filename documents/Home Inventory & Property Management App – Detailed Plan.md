@@ -29,7 +29,7 @@ Property
 ```
 Everything belongs somewhere.  
 
-Implementation status (2026-10-04): Modules 1–5, 8 (Documents, except OCR), 9 (Photos), 10 (Maintenance), 11 (Utilities), 12 (Paint Library), 13 (Asset History), 14 (Insurance report, printable/PDF via the browser) and 16 (QR labels; phone access over the network still to come) are implemented. Module 17 (Dashboard) is implemented. Modules 6 (barcode scanning outstanding), 7 and 15 are largely implemented. The AI features are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
+Implementation status (2026-10-04): Modules 1–5, 8 (Documents, except OCR), 9 (Photos), 10 (Maintenance), 11 (Utilities), 12 (Paint Library), 13 (Asset History), 14 (Insurance report, printable/PDF via the browser) and 16 (QR labels, with phone access over the home network behind a PIN) are implemented. Module 17 (Dashboard) is implemented. Modules 6 (barcode scanning outstanding), 7 and 15 are largely implemented. AI: receipt reading/OCR and photo-to-asset are implemented; paint recognition and plain-language questions are not started. See [OUTSTANDING_WORK.md](OUTSTANDING_WORK.md) for details and known bugs.  
   
 ⸻  
   

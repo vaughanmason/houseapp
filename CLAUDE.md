@@ -16,12 +16,18 @@ dotnet ef migrations add <Name> --project HomeInventory        # after changing 
 dotnet ef migrations script <From> <To> --project HomeInventory  # review the SQL before running the app
 ```
 
+- On the dev machine, Windows Smart App Control blocks the unsigned test assemblies, so `dotnet test` can fail locally with "An Application Control policy has blocked this file" (the app itself still runs). CI runs on every branch: push a branch and read the results (test failures appear as annotations via GitHubActionsTestLogger) from the public API, e.g. `https://api.github.com/repos/vaughanmason/houseapp/actions/runs?branch=<branch>`, then `/check-runs/<job id>/annotations`. Merge to `master` only when CI is green.
 - Target framework is `net10.0` (SDK 10.x). CI (`.github/workflows/ci.yml`) runs restore, a Release build with `-warnaserror`, and the tests on every push or PR to `master`.
 - The build is warning-free with .NET analyzers at `latest-recommended` (`Directory.Build.props`), and CI uses `-warnaserror`. `.editorconfig` holds the style settings and the two deliberate rule suppressions (CA1716 for entity names, CA1707 for xUnit test names). Use culture-invariant string APIs (`StringComparison.Ordinal*`, `ToLowerInvariant`).
 - `UseAppHost` is false, so the host runs through `dotnet HomeInventory.dll`. Windows Application Control on the dev machine blocks the freshly built `HomeInventory.exe`.
 - Running the app creates or migrates the real local database at `%LOCALAPPDATA%\HomeInventory\inventory.db`. Tests never touch it.
 
 ## Architecture
+
+- **Network access** (`HomeInventory/NetworkAccess.cs`): middleware runs early in `Program.cs`. Loopback requests always pass; public addresses get 403; home-network (RFC 1918/link-local/ULA) requests need the setting on plus a cookie whose `pin-version` claim matches the current PIN version. Settings live in `network.json` (PBKDF2 PIN hash). `/api/network` is loopback-only. When enabled, `Program.cs` calls `UseUrls("http://0.0.0.0:{port}")`, which takes effect on restart. Tests simulate other devices with the `X-Test-Remote-Ip` header (test-only startup filter).
+- **Images** (`ImageTools.cs`, Magick.NET): HEIC uploads become JPEG in `FileStore.SaveAsync` (the HEIC is kept if decoding fails); thumbnails are created lazily as `<file>.thumb.jpg` and deleted with the file. Magick.NET can decode HEIC but not encode it, so tests can't generate HEIC files.
+- **Barcodes**: `POST /api/barcode` decodes server-side with ZXing.Net from Magick RGB pixels. This is photo-based on purpose: live camera scanning needs HTTPS, and home-network access is plain HTTP.
+- **AI** (`InventoryAssistant.cs`): `IInventoryAssistant` with `ClaudeInventoryAssistant` (official `Anthropic` SDK, beta messages for server-side fallback, `claude-opus-5-5`, low effort, JSON-schema structured output). The key comes from `Anthropic:ApiKey` or `ANTHROPIC_API_KEY`; without one `IsConfigured` is false and the endpoints return 503. Tests replace it with `FakeInventoryAssistant`; never call the real API from tests.
 
 - Stack decision (2026-10-04): stay on Blazor WebAssembly with the ASP.NET Core host and SQLite. Don't introduce Flutter, MAUI or a separate client. Multi-device access is planned through network access to this app.
 

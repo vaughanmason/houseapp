@@ -8,14 +8,12 @@ This started as a code review of commit `3d4bb42` and has tracked the work since
 
 | Item | What's needed |
 |------|---------------|
-| **Network access** (module 16) | QR labels print and the scan pages work, but the app only listens on `localhost`, so a phone can scan a label without being able to open it. Binding to the home network needs an access-control choice (none, a shared PIN, or user accounts). |
-| **AI features** | Photo recognition (fill in an asset from a picture), receipt reading/OCR (also makes documents searchable by content), paint colour recognition, and plain-language questions. These need a provider, an API key and an acceptable running cost. |
-| **Thumbnails and HEIC display** | Full-size images are scaled in the browser, and iPhone HEIC photos are stored but most browsers can't show them. Fixing both needs an image library (e.g. SkiaSharp, MIT, or ImageSharp, split licence). |
-| **Restore merging** | Import skips records that already exist (by backup ID), so an older backup can never overwrite newer data, but edits in a backup can't flow into existing records either. Merge rules (newest wins? ask per record?) are a product decision. |
-| **Barcode scanning** | Assets have a `Barcode` field (searchable). Scanning with a camera needs a choice of device and library. |
+| **More AI features** | Receipt reading and "Fill from photo" are done. Paint colour recognition and plain-language questions ("Where is my drill?") remain; they need an agreed scope and cost. |
+| **HTTPS on the home network** | Network access uses plain HTTP inside the home network. Live in-browser camera scanning and stronger protection against snooping on shared Wi-Fi would need HTTPS, which means a certificate trusted by each phone. |
 
 ## Decided
 
+- **Defaults adopted (2026-10-05):** network access behind a shared PIN, home network only; Magick.NET for thumbnails and HEIC (SkiaSharp can't decode HEIC on Windows); photo-based barcode scanning with ZXing.Net (live camera scanning needs HTTPS); Claude for receipt reading and photo-to-asset; **restore merging stays as it is**: existing records are skipped, never overwritten.
 - **Stack (2026-10-04):** stay on Blazor WebAssembly with the ASP.NET Core minimal-API host and SQLite. The Flutter/offline-first suggestion in the original plan is not being pursued. Phone and multi-device access will come through network access to this app (see above), not a separate client.
 
 ## Known limitations
@@ -26,7 +24,9 @@ This started as a code review of commit `3d4bb42` and has tracked the work since
 - **Contacts:** supplier and installer fields offer contact names as suggestions but store text, not a link to the contact record.
 - **Room completion:** a room counts as fully documented with dimensions, flooring, wall finish, at least one surface and at least one photo. Change `RoomCompletion` in `InventoryApi.cs` if you'd like a different definition.
 - **Maintenance:** service records can't carry photos directly. Attach a document to the task instead.
-- **Tests:** there are 46 HTTP-level API tests but no browser UI tests (bUnit/Playwright).
+- **Tests:** there are 55 HTTP-level API tests but no browser UI tests (bUnit/Playwright). Windows Smart App Control blocks the unsigned test assemblies on the dev machine, so tests run in CI (every branch).
+- **HEIC from old backups:** HEIC files restored from a backup stay HEIC (thumbnails still work); only new uploads are converted.
+- **AI cost:** each receipt or photo is a paid Claude request (roughly US$0.01-0.03). Requests are only made when you press the button.
 
 ## Done
 
@@ -61,6 +61,7 @@ This started as a code review of commit `3d4bb42` and has tracked the work since
 - Dashboard (module 17): recent purchases and room completion, alongside the value, maintenance, warranty and receipt cards.
 - Asset barcode and manual link (module 6, minus scanning); contacts directory with suggestions in supplier/installer fields.
 - Delete confirmations on every destructive action.
+- Network access for phones behind a PIN; thumbnails and HEIC conversion; photo-based barcode scanning; Claude receipt reading (with searchable document text) and "Fill from photo".
 
 ### Housekeeping
 
