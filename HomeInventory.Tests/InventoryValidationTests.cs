@@ -1141,6 +1141,48 @@ public sealed class InventoryValidationTests
         Assert.Equal((HttpStatusCode)429, (await SignInAsync(phone, "2468")).StatusCode); // even the right PIN waits out the lockout
     }
 
+    [Fact]
+    public async Task Thumbnails_AreSmallJpegsCachedAndRemovedWithThePhoto()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        using var source = new ImageMagick.MagickImage(ImageMagick.MagickColors.SteelBlue, 1200, 800);
+        var photo = await UploadAsync(client, source.ToByteArray(ImageMagick.MagickFormat.Png), "lounge.png");
+        var record = (await (await client.PostAsJsonAsync($"/api/properties/{property.Id}/photos", new PhotoMetadataInput(photo.StorageKey, null, 0))).Content.ReadFromJsonAsync<PhotoMetadataDto>())!;
+
+        var thumbnail = await client.GetAsync($"/api/files/{photo.StorageKey}?size=thumb");
+        Assert.Equal("image/jpeg", thumbnail.Content.Headers.ContentType?.MediaType);
+        using (var image = new ImageMagick.MagickImage(await thumbnail.Content.ReadAsByteArrayAsync()))
+            Assert.Equal((360u, 240u), (image.Width, image.Height));
+        var cached = Path.Combine(factory.FilesPath, photo.StorageKey) + ".thumb.jpg";
+        Assert.True(File.Exists(cached));
+
+        var pdf = await UploadAsync(client, PdfBytes, "manual.pdf");
+        Assert.Equal("application/pdf", (await client.GetAsync($"/api/files/{pdf.StorageKey}?size=thumb")).Content.Headers.ContentType?.MediaType);
+
+        await client.DeleteAsync($"/api/properties/{property.Id}/photos/{record.Id}");
+        Assert.False(File.Exists(cached));
+    }
+
+    [Fact]
+    public async Task HeicUploads_AreConvertedToJpeg()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        using var source = new ImageMagick.MagickImage(ImageMagick.MagickColors.Orange, 640, 480);
+        var heic = source.ToByteArray(ImageMagick.MagickFormat.Heic);
+        Assert.Equal("ftyp", System.Text.Encoding.ASCII.GetString(heic, 4, 4));
+
+        var uploaded = await UploadAsync(client, heic, "IMG_0001.HEIC");
+
+        Assert.EndsWith(".jpg", uploaded.StorageKey);
+        Assert.Equal("image/jpeg", uploaded.ContentType);
+        using var stored = new ImageMagick.MagickImage(await client.GetByteArrayAsync($"/api/files/{uploaded.StorageKey}"));
+        Assert.Equal((640u, 480u), (stored.Width, stored.Height));
+        Assert.Empty(Directory.GetFiles(factory.FilesPath, "*.heic", SearchOption.AllDirectories));
+    }
+
     private static Task<HttpResponseMessage> SignInAsync(HttpClient client, string pin, string returnUrl = "/") =>
         client.PostAsync("/pin", new FormUrlEncodedContent(new Dictionary<string, string> { ["pin"] = pin, ["returnUrl"] = returnUrl }));
 

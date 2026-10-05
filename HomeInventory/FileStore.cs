@@ -10,6 +10,7 @@ namespace HomeInventory;
 public sealed partial class FileStore(string rootPath)
 {
     public const long MaxBytes = 20 * 1024 * 1024;
+    public const int ThumbnailSize = 360;
 
     static readonly Dictionary<string, string> ContentTypes = new()
     {
@@ -56,7 +57,44 @@ public sealed partial class FileStore(string rootPath)
                 return (null, "Files must be 20 MB or smaller.");
             }
         }
+        if (extension == ".heic") key = await ConvertHeicAsync(key);
         return (key, null);
+    }
+
+    /// <summary>iPhone HEIC photos are converted to JPEG on upload so every browser can show them; the HEIC is kept if conversion fails.</summary>
+    async Task<string> ConvertHeicAsync(string heicKey)
+    {
+        var jpegKey = heicKey[..^".heic".Length] + ".jpg";
+        try
+        {
+            await Task.Run(() => ImageTools.ConvertToJpeg(FullPath(heicKey), FullPath(jpegKey)));
+            File.Delete(FullPath(heicKey));
+            return jpegKey;
+        }
+        catch (ImageMagick.MagickException)
+        {
+            if (File.Exists(FullPath(jpegKey))) File.Delete(FullPath(jpegKey));
+            return heicKey;
+        }
+    }
+
+    /// <summary>A cached JPEG thumbnail of a stored image, created on first request; null for PDFs or images that can't be decoded.</summary>
+    public async Task<Stream?> OpenThumbnailAsync(string key)
+    {
+        if (!IsStoredKey(key) || Path.GetExtension(key) == ".pdf" || !File.Exists(FullPath(key))) return null;
+        var thumbnail = ThumbnailPath(key);
+        if (!File.Exists(thumbnail))
+        {
+            try
+            {
+                await Task.Run(() => ImageTools.WriteThumbnail(FullPath(key), thumbnail, ThumbnailSize));
+            }
+            catch (ImageMagick.MagickException)
+            {
+                return null;
+            }
+        }
+        return File.OpenRead(thumbnail);
     }
 
     /// <summary>
@@ -96,10 +134,13 @@ public sealed partial class FileStore(string rootPath)
 
     public void Delete(string key)
     {
-        if (IsStoredKey(key) && File.Exists(FullPath(key))) File.Delete(FullPath(key));
+        if (!IsStoredKey(key)) return;
+        if (File.Exists(FullPath(key))) File.Delete(FullPath(key));
+        if (File.Exists(ThumbnailPath(key))) File.Delete(ThumbnailPath(key));
     }
 
     string FullPath(string key) => Path.Combine(RootPath, key.Replace('/', Path.DirectorySeparatorChar));
+    string ThumbnailPath(string key) => FullPath(key) + ".thumb.jpg";
 
     static string? Sniff(ReadOnlySpan<byte> h)
     {

@@ -30,14 +30,14 @@
                 var url = FileUrl(photo.StorageKey);
                 <div class="col-6 col-md-4 col-lg-3">
                     <div class="card h-100">
-                        @if (url is not null && !photo.StorageKey.EndsWith(".heic"))
+                        @if (url is not null)
                         {
-                            <a href="@url" target="_blank"><img src="@url" class="card-img-top" style="height: 140px; object-fit: cover;" alt="@photo.Caption" /></a>
+                            <a href="@url" target="_blank"><img src="@($"{url}?size=thumb")" loading="lazy" class="card-img-top" style="height: 140px; object-fit: cover;" alt="@photo.Caption" /></a>
                         }
                         <div class="card-body p-2">
                             <div class="small"><strong>@photo.Caption</strong></div>
                             @if (url is null) { <div class="small text-muted text-break">@photo.StorageKey</div> }
-                            else if (photo.StorageKey.EndsWith(".heic")) { <a class="small" href="@url" target="_blank">Download HEIC photo</a> }
+                            else if (photo.StorageKey.EndsWith(".heic", StringComparison.Ordinal)) { <a class="small" href="@url" target="_blank">Download original (HEIC)</a> }
                             <button class="btn btn-sm btn-outline-danger mt-1" @onclick="@(() => pending = new("Delete photo", $"Delete {(string.IsNullOrWhiteSpace(photo.Caption) ? "this photo" : photo.Caption)}?", () => DeleteAsync(photo.Id)))">Delete</button>
                         </div>
                     </div>

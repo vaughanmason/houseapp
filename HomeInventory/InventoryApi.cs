@@ -688,11 +688,13 @@ public static class InventoryApi
             var (key, error) = await store.SaveAsync(stream, file.Length);
             return key is null ? Results.BadRequest(error) : Results.Ok(new UploadedFileDto(key, System.IO.Path.GetFileName(file.FileName), FileStore.ContentTypeFor(key), file.Length));
         }).DisableAntiforgery(); // multipart uploads from the local WASM client; JSON endpoints don't use antiforgery either
-        api.MapGet("/files/{**key}", (string key, FileStore store, HttpContext context) =>
+        api.MapGet("/files/{**key}", async (string key, string? size, FileStore store, HttpContext context) =>
         {
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            // ?size=thumb serves a small cached JPEG (falling back to the original if no thumbnail can be made).
+            if (size == "thumb" && await store.OpenThumbnailAsync(key) is { } thumbnail) return Results.File(thumbnail, "image/jpeg");
             var stream = store.Open(key);
             if (stream is null) return Results.NotFound();
-            context.Response.Headers.XContentTypeOptions = "nosniff";
             return Results.File(stream, FileStore.ContentTypeFor(key), enableRangeProcessing: true);
         });
 

@@ -80,8 +80,12 @@
                 {
                     var url = PhotoManager.FileUrl(doc.StorageKey);
                     <li class="list-group-item">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                            @if (url is not null && !doc.StorageKey.EndsWith(".pdf", StringComparison.Ordinal))
+                            {
+                                <a href="@url" target="_blank"><img src="@($"{url}?size=thumb")" loading="lazy" alt="" style="width: 64px; height: 64px; object-fit: cover;" class="rounded border" /></a>
+                            }
+                            <div class="flex-grow-1">
                                 <strong>@doc.Title</strong> <span class="badge text-bg-light">@doc.Kind</span>
                                 @if (doc.ExpiresOn is DateOnly expires)
                                 {
