@@ -711,6 +711,78 @@ public static class InventoryApi
                 return Results.BadRequest("That file is not an image.");
             }
         }).DisableAntiforgery();
+        api.MapGet("/ai/status", (IInventoryAssistant assistant) => new AssistantStatusDto(assistant.IsConfigured));
+        // Reads a receipt/invoice/warranty document with Claude, stores the transcription for search, and returns the extracted fields.
+        api.MapPost("/ai/receipt/{documentId:guid}", async (Guid documentId, InventoryDbContext db, FileStore store, IInventoryAssistant assistant, CancellationToken cancellationToken) =>
+        {
+            if (!assistant.IsConfigured) return Results.Problem("AI features are off: no Anthropic API key is configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            var document = await db.Documents.FindAsync([documentId], cancellationToken);
+            if (document is null) return Results.NotFound();
+            await using var stream = store.Open(document.StorageKey);
+            if (stream is null) return Results.BadRequest("This document has no uploaded file to read.");
+            var isPdf = FileStore.ContentTypeFor(document.StorageKey) == "application/pdf";
+            byte[] content;
+            try
+            {
+                if (isPdf)
+                {
+                    using var buffer = new MemoryStream();
+                    await stream.CopyToAsync(buffer, cancellationToken);
+                    content = buffer.ToArray();
+                }
+                else
+                {
+                    content = await Task.Run(() => ImageTools.PrepareForVision(stream), cancellationToken);
+                }
+            }
+            catch (ImageMagick.MagickException)
+            {
+                return Results.BadRequest("This document's file could not be read as an image.");
+            }
+            var (reading, error) = await CallAssistant(() => assistant.ReadReceiptAsync(content, isPdf ? "application/pdf" : "image/jpeg", cancellationToken));
+            if (error is not null) return error;
+            document.ExtractedText = reading!.Transcription.Length > 20000 ? reading.Transcription[..20000] : reading.Transcription;
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.Ok(reading.Receipt);
+        });
+        // Applies reviewed receipt details: the document's date (and warranty expiry), and optionally the attached asset's purchase date and price.
+        api.MapPost("/documents/{id:guid}/apply-receipt", async (Guid id, ApplyReceiptInput input, InventoryDbContext db) =>
+        {
+            var document = await db.Documents.FindAsync(id);
+            if (document is null) return Results.NotFound();
+            var receipt = input.Receipt;
+            if (receipt.PurchaseDate is DateOnly purchased)
+            {
+                document.DocumentDate = purchased;
+                if (receipt.WarrantyMonths is int months && document.ExpiresOn is null) document.ExpiresOn = purchased.AddMonths(months);
+            }
+            if (string.IsNullOrWhiteSpace(document.Notes) && !string.IsNullOrWhiteSpace(receipt.Summary)) document.Notes = receipt.Summary.Trim();
+            if (input.UpdateAsset && document.AssetId is Guid assetId && await db.Assets.FindAsync(assetId) is { } asset)
+            {
+                asset.PurchaseDate = receipt.PurchaseDate ?? asset.PurchaseDate;
+                asset.PurchasePrice = receipt.Total ?? asset.PurchasePrice;
+            }
+            await db.SaveChangesAsync();
+            return Results.Ok((await DocumentDtos(db, db.Documents.Where(x => x.Id == id))).Single());
+        });
+        // Suggests asset details from a photo; nothing is saved until the user reviews and adds the asset.
+        api.MapPost("/ai/identify", async (IFormFile file, string? currency, IInventoryAssistant assistant, CancellationToken cancellationToken) =>
+        {
+            if (!assistant.IsConfigured) return Results.Problem("AI features are off: no Anthropic API key is configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            if (file.Length is 0 or > FileStore.MaxBytes) return Results.BadRequest("Photos must be between 1 byte and 20 MB.");
+            byte[] image;
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                image = await Task.Run(() => ImageTools.PrepareForVision(stream), cancellationToken);
+            }
+            catch (ImageMagick.MagickException)
+            {
+                return Results.BadRequest("That file is not an image.");
+            }
+            var (suggestion, error) = await CallAssistant(() => assistant.IdentifyItemAsync(image, NormalizeCurrency(currency) ?? "USD", cancellationToken));
+            return error ?? Results.Ok(suggestion);
+        }).DisableAntiforgery();
         api.MapGet("/files/{**key}", async (string key, string? size, FileStore store, HttpContext context) =>
         {
             context.Response.Headers.XContentTypeOptions = "nosniff";
@@ -889,7 +961,7 @@ public static class InventoryApi
                 || EF.Functions.Like(x.ColorName, pattern, "\\") || EF.Functions.Like(x.ColorCode, pattern, "\\") || EF.Functions.Like(x.Finish, pattern, "\\") || EF.Functions.Like(x.Material, pattern, "\\")
                 || EF.Functions.Like(x.Manufacturer, pattern, "\\") || EF.Functions.Like(x.ProductName, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\")).Take(Limit).ToListAsync();
             var documents = await DocumentDtos(db, db.Documents.Where(x => EF.Functions.Like(x.Title, pattern, "\\") || EF.Functions.Like(x.Kind, pattern, "\\") || EF.Functions.Like(x.Tags, pattern, "\\")
-                || EF.Functions.Like(x.Notes, pattern, "\\") || EF.Functions.Like(x.FileName, pattern, "\\")).Take(Limit));
+                || EF.Functions.Like(x.Notes, pattern, "\\") || EF.Functions.Like(x.FileName, pattern, "\\") || EF.Functions.Like(x.ExtractedText, pattern, "\\")).Take(Limit));
 
             var contacts = await db.Contacts.Where(x => EF.Functions.Like(x.Name, pattern, "\\") || EF.Functions.Like(x.Company, pattern, "\\") || EF.Functions.Like(x.Kind, pattern, "\\")
                 || EF.Functions.Like(x.Phone, pattern, "\\") || EF.Functions.Like(x.Email, pattern, "\\") || EF.Functions.Like(x.Notes, pattern, "\\")).Take(Limit).ToListAsync();
@@ -1325,6 +1397,22 @@ public static class InventoryApi
         c.Email = x.Email?.Trim();
         c.Website = x.Website?.Trim();
         c.Notes = x.Notes?.Trim();
+    }
+    // Turns assistant and API failures into readable responses instead of 500s.
+    static async Task<(T? Value, IResult? Error)> CallAssistant<T>(Func<Task<T>> call) where T : class
+    {
+        try
+        {
+            return (await call(), null);
+        }
+        catch (AssistantException ex)
+        {
+            return (null, Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway));
+        }
+        catch (Anthropic.Exceptions.AnthropicApiException ex)
+        {
+            return (null, Results.Problem($"The AI service returned an error: {ex.Message}", statusCode: StatusCodes.Status502BadGateway));
+        }
     }
     static string FormatAmount(decimal? value) => value?.ToString("0.00", CultureInfo.InvariantCulture) ?? "none";
     // A room is fully documented when it has dimensions, flooring, a wall finish, at least one surface record and at least one photo.

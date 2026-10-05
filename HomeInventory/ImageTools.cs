@@ -35,6 +35,17 @@ public static class ImageTools
         File.Move(temporary, targetPath, overwrite: true);
     }
 
+    /// <summary>A JPEG no larger than 1568 px on its long edge (Claude's recommended image size); also converts HEIC.</summary>
+    public static byte[] PrepareForVision(Stream content)
+    {
+        using var image = new MagickImage(content);
+        image.AutoOrient();
+        if (Math.Max(image.Width, image.Height) > 1568) image.Resize(new MagickGeometry(1568, 1568));
+        image.Strip();
+        image.Quality = 85;
+        return image.ToByteArray(MagickFormat.Jpeg);
+    }
+
     /// <summary>Raw 24-bit RGB pixels, e.g. for barcode decoding.</summary>
     public static (byte[] Pixels, int Width, int Height) ReadRgb(Stream content)
     {

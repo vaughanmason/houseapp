@@ -12,7 +12,17 @@
 <div class="row g-4">
     <div class="col-lg-5">
         <div class="card card-body">
-            <h2 class="h4">@(editingAssetId is null ? "Add asset" : "Edit asset")</h2>
+            <div class="d-flex justify-content-between align-items-center">
+                <h2 class="h4">@(editingAssetId is null ? "Add asset" : "Edit asset")</h2>
+                @if (aiEnabled && editingAssetId is null)
+                {
+                    <label class="btn btn-sm btn-outline-success mb-2 @(identifying ? "disabled" : "")" title="Take or choose a photo and let AI suggest the details">
+                        @(identifying ? "Looking…" : "Fill from photo")
+                        <InputFile OnChange="IdentifyAsync" accept="image/*" capture="environment" class="d-none" />
+                    </label>
+                }
+            </div>
+            @if (suggestionNote is not null) { <div class="alert alert-info py-1 small">@suggestionNote</div> }
             <select class="form-select mb-2" @bind="propertyId" @bind:after="RefreshLocationsAndRooms">
                 <option value="">Choose property</option>
                 @foreach (var p in properties) { <option value="@p.Id">@p.Name</option> }
@@ -340,9 +350,40 @@
 
     Guid? editingAssetId;
     string? error;
+    bool aiEnabled, identifying;
+    string? suggestionNote;
+
+    // Fills only empty fields, so nothing the user already typed is overwritten; nothing is saved until "Add asset".
+    async Task IdentifyAsync(InputFileChangeEventArgs e)
+    {
+        error = suggestionNote = null;
+        const long maxBytes = 20 * 1024 * 1024;
+        if (e.File.Size > maxBytes) { error = "Photos must be 20 MB or smaller."; return; }
+        identifying = true;
+        try
+        {
+            var currency = Guid.TryParse(propertyId, out var pid) ? GetPropertyCurrency(pid) : properties.FirstOrDefault()?.Currency ?? "USD";
+            using var content = new MultipartFormDataContent { { new StreamContent(e.File.OpenReadStream(maxBytes)), "file", e.File.Name } };
+            var response = await Http.PostAsync($"api/ai/identify?currency={Uri.EscapeDataString(currency ?? "USD")}", content);
+            if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+            var suggestion = (await response.Content.ReadFromJsonAsync<AssetSuggestionDto>())!;
+            if (string.IsNullOrWhiteSpace(assetName)) assetName = suggestion.Name;
+            if (string.IsNullOrWhiteSpace(assetCategory)) assetCategory = suggestion.Category;
+            if (string.IsNullOrWhiteSpace(assetBrand)) assetBrand = suggestion.Brand ?? "";
+            if (string.IsNullOrWhiteSpace(assetModel)) assetModel = suggestion.Model ?? "";
+            if (string.IsNullOrWhiteSpace(assetDescription)) assetDescription = suggestion.Description ?? "";
+            if (string.IsNullOrWhiteSpace(assetCurrentValue) && suggestion.EstimatedValue is decimal value) assetCurrentValue = value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            suggestionNote = $"Suggested from the photo ({suggestion.Confidence} confidence). Check the details, then add the asset. Add the photo itself in Asset photos below.";
+        }
+        finally
+        {
+            identifying = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        aiEnabled = (await Http.GetFromJsonAsync<AssistantStatusDto>("api/ai/status"))?.Enabled ?? false;
         properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
         floors = await Http.GetFromJsonAsync<List<FloorDto>>("api/floors") ?? [];
         rooms = await Http.GetFromJsonAsync<List<RoomDto>>("api/rooms") ?? [];

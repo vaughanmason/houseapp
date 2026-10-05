@@ -1211,6 +1211,58 @@ public sealed class InventoryValidationTests
         Assert.Equal(HttpStatusCode.BadRequest, (await PostImageAsync(client, "/api/barcode", "not an image"u8.ToArray(), "notes.txt")).StatusCode);
     }
 
+    [Fact]
+    public async Task Ai_ReadsReceiptsStoresTextForSearchAndAppliesReviewedDetails()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var property = await CreatePropertyAsync(client);
+        var tv = await CreateAssetAsync(client, property.Id, null, null, "TV");
+        var pdf = await UploadAsync(client, PdfBytes, "receipt.pdf");
+        var document = (await (await client.PostAsJsonAsync("/api/documents", new DocumentInput(property.Id, null, null, tv.Id, null, "TV receipt", "Receipt", pdf.StorageKey, null, null, null, null, null, null, null))).Content.ReadFromJsonAsync<DocumentDto>())!;
+
+        Assert.False((await client.GetFromJsonAsync<AssistantStatusDto>("/api/ai/status"))!.Enabled);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.PostAsync($"/api/ai/receipt/{document.Id}", null)).StatusCode);
+
+        factory.Assistant.IsConfigured = true;
+        var read = new ReceiptReadDto("Hi-Fi Corp", new DateOnly(2026, 3, 14), 8999.99m, "ZAR", [new ReceiptLineDto("Samsung QE55 TV", 1, 8999.99m)], 24, "Samsung TV bought at Hi-Fi Corp.");
+        factory.Assistant.Receipt = new ReceiptReading(read, "HI-FI CORP TAX INVOICE Samsung QE55 8999.99 ZAR");
+        var response = await client.PostAsync($"/api/ai/receipt/{document.Id}", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Hi-Fi Corp", (await response.Content.ReadFromJsonAsync<ReceiptReadDto>())!.Merchant);
+        Assert.Equal("application/pdf", factory.Assistant.LastMediaType);
+
+        // The transcription makes the document findable by words only found in the file.
+        Assert.Equal("TV receipt", Assert.Single((await client.GetFromJsonAsync<List<SearchResultDto>>("/api/search?q=qe55"))!, x => x.Kind == "Document").Title);
+
+        var applied = (await (await client.PostAsJsonAsync($"/api/documents/{document.Id}/apply-receipt", new ApplyReceiptInput(read, UpdateAsset: true))).Content.ReadFromJsonAsync<DocumentDto>())!;
+        Assert.Equal((new DateOnly(2026, 3, 14), new DateOnly(2028, 3, 14), "Samsung TV bought at Hi-Fi Corp."), (applied.DocumentDate, applied.ExpiresOn, applied.Notes));
+        var updatedTv = (await client.GetFromJsonAsync<AssetDto>($"/api/assets/{tv.Id}"))!;
+        Assert.Equal((new DateOnly(2026, 3, 14), 8999.99m), (updatedTv.PurchaseDate, updatedTv.PurchasePrice));
+
+        factory.Assistant.FailWith = "Claude declined to read this file.";
+        var failed = await client.PostAsync($"/api/ai/receipt/{document.Id}", null);
+        Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
+        Assert.Contains("declined", await failed.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Ai_IdentifiesItemsFromPhotosInThePropertyCurrency()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        factory.Assistant.IsConfigured = true;
+        factory.Assistant.Suggestion = new AssetSuggestionDto("Cordless drill", "Tools", "Makita", "DHP482", "18V cordless hammer drill.", 1200m, "high");
+        using var photo = new ImageMagick.MagickImage(ImageMagick.MagickColors.Teal, 3000, 2000);
+
+        var response = await PostImageAsync(client, "/api/ai/identify?currency=zar", photo.ToByteArray(ImageMagick.MagickFormat.Jpeg), "drill.jpg");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Makita", (await response.Content.ReadFromJsonAsync<AssetSuggestionDto>())!.Brand);
+        Assert.Equal("ZAR", factory.Assistant.LastCurrency);
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostImageAsync(client, "/api/ai/identify", "not an image"u8.ToArray(), "notes.txt")).StatusCode);
+    }
+
     private static async Task<HttpResponseMessage> PostImageAsync(HttpClient client, string url, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };

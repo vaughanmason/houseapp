@@ -281,6 +281,8 @@ public sealed class Document : IHasExternalId
     public DateOnly? ExpiresOn { get; set; }
     public string? Tags { get; set; }
     public string? Notes { get; set; }
+    /// <summary>Text read from the file by the AI assistant, so documents are searchable by their content.</summary>
+    public string? ExtractedText { get; set; }
     public Property? Property { get; set; }
     public Room? Room { get; set; }
     public Fixture? Fixture { get; set; }
@@ -429,6 +431,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
         model.Entity<Document>().Property(x => x.ContentType).HasMaxLength(100);
         model.Entity<Document>().Property(x => x.Tags).HasMaxLength(400);
         model.Entity<Document>().Property(x => x.Notes).HasMaxLength(2000);
+        model.Entity<Document>().Property(x => x.ExtractedText).HasMaxLength(20000);
         model.Entity<Document>().HasOne(x => x.Property).WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Cascade);
         // Deleting what a document is attached to keeps the document at property level rather than losing a receipt or warranty.
         model.Entity<Document>().HasOne(x => x.Room).WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);

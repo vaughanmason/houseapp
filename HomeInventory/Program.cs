@@ -19,6 +19,7 @@ var networkSettingsPath = Path.Combine(dataDirectory, "network.json");
 var networkSettings = NetworkSettingsStore.Load(networkSettingsPath);
 if (networkSettings.Enabled && networkSettings.HasPin) builder.WebHost.UseUrls($"http://0.0.0.0:{networkSettings.Port}");
 builder.Services.AddNetworkAccess(networkSettingsPath);
+builder.Services.AddSingleton<IInventoryAssistant, ClaudeInventoryAssistant>();
 
 var app = builder.Build();
 

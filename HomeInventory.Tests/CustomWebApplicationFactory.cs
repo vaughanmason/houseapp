@@ -1,5 +1,6 @@
 using System.Net;
 using HomeInventory;
+using HomeInventory.Client;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -20,6 +21,9 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     /// <summary>Per-factory upload folder so tests never touch the real %LOCALAPPDATA% files.</summary>
     public string FilesPath { get; } = Path.Combine(Path.GetTempPath(), "HomeInventoryTests", Guid.NewGuid().ToString("N"));
 
+    /// <summary>Stand-in for Claude so tests never call the real API (off unless a test turns it on).</summary>
+    public FakeInventoryAssistant Assistant { get; } = new();
+
     public CustomWebApplicationFactory()
     {
         _connection.Open();
@@ -38,6 +42,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<NetworkSettingsStore>();
             services.AddSingleton(new NetworkSettingsStore(Path.Combine(FilesPath, "network.json")));
             services.AddSingleton<IStartupFilter, RemoteIpStartupFilter>();
+            services.RemoveAll<IInventoryAssistant>();
+            services.AddSingleton<IInventoryAssistant>(Assistant);
             services.AddDbContext<InventoryDbContext>((serviceProvider, options) =>
             {
                 options.UseSqlite(serviceProvider.GetRequiredService<SqliteConnection>());
@@ -67,5 +73,28 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             });
             next(app);
         };
+    }
+}
+
+/// <summary>Canned AI answers for tests; records what it was asked.</summary>
+public sealed class FakeInventoryAssistant : IInventoryAssistant
+{
+    public bool IsConfigured { get; set; }
+    public ReceiptReading? Receipt { get; set; }
+    public AssetSuggestionDto? Suggestion { get; set; }
+    public string? FailWith { get; set; }
+    public string? LastMediaType { get; private set; }
+    public string? LastCurrency { get; private set; }
+
+    public Task<ReceiptReading> ReadReceiptAsync(byte[] content, string mediaType, CancellationToken cancellationToken)
+    {
+        LastMediaType = mediaType;
+        return FailWith is null ? Task.FromResult(Receipt!) : throw new AssistantException(FailWith);
+    }
+
+    public Task<AssetSuggestionDto> IdentifyItemAsync(byte[] image, string currency, CancellationToken cancellationToken)
+    {
+        LastCurrency = currency;
+        return FailWith is null ? Task.FromResult(Suggestion!) : throw new AssistantException(FailWith);
     }
 }

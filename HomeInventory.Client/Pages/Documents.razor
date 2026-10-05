@@ -99,10 +99,38 @@
                             </div>
                             <div class="text-nowrap">
                                 @if (url is not null) { <a class="btn btn-sm btn-outline-secondary me-1" href="@url" target="_blank">Open</a> }
+                                @if (aiEnabled && url is not null && ReadableKinds.Contains(doc.Kind))
+                                {
+                                    <button class="btn btn-sm btn-outline-success me-1" disabled="@(readingId is not null)" @onclick="() => ReadReceiptAsync(doc)">@(readingId == doc.Id ? "Reading…" : "Read with AI")</button>
+                                }
                                 <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => StartEditAsync(doc)">Edit</button>
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => deleting = doc">Delete</button>
                             </div>
                         </div>
+                        @if (receiptDocumentId == doc.Id && receipt is not null)
+                        {
+                            <div class="border rounded p-2 mt-2 bg-light">
+                                <div class="small"><strong>@(receipt.Merchant ?? "Unknown merchant")</strong> · @(receipt.PurchaseDate?.ToString("yyyy-MM-dd") ?? "no date") · @(receipt.Total is decimal total ? $"{receipt.Currency} {total:0.00}" : "no total")</div>
+                                @if (receipt.WarrantyMonths is int months) { <div class="small">Warranty: @months months</div> }
+                                @if (!string.IsNullOrEmpty(receipt.Summary)) { <div class="small text-muted">@receipt.Summary</div> }
+                                @if (receipt.Items.Count > 0)
+                                {
+                                    <ul class="small mb-1">
+                                        @foreach (var item in receipt.Items.Take(10)) { <li>@item.Description @(item.Price is decimal price ? $"– {price:0.00}" : "")</li> }
+                                    </ul>
+                                }
+                                @if (doc.AssetId is not null)
+                                {
+                                    <div class="form-check small">
+                                        <input class="form-check-input" type="checkbox" id="update-asset" @bind="updateAsset" />
+                                        <label class="form-check-label" for="update-asset">Also set the asset's purchase date and price</label>
+                                    </div>
+                                }
+                                <button class="btn btn-sm btn-success mt-1" @onclick="() => ApplyReceiptAsync(doc.Id)">Apply</button>
+                                <button class="btn btn-sm btn-outline-secondary mt-1 ms-1" @onclick="() => receipt = null">Dismiss</button>
+                                <div class="small text-muted mt-1">The text was saved with the document, so search now finds it by its contents.</div>
+                            </div>
+                        }
                     </li>
                 }
             </ul>
@@ -141,11 +169,58 @@
     string filterPropertyId = "", filterKind = "", filterText = "";
     bool busy;
     string? error;
+    static readonly string[] ReadableKinds = ["Receipt", "Invoice", "Warranty", "Insurance", "Certificate"];
+    bool aiEnabled, updateAsset = true;
+    Guid? readingId, receiptDocumentId;
+    ReceiptReadDto? receipt;
 
     protected override async Task OnInitializedAsync()
     {
         properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        aiEnabled = (await Http.GetFromJsonAsync<AssistantStatusDto>("api/ai/status"))?.Enabled ?? false;
         await ReloadAsync();
+    }
+
+    async Task ReadReceiptAsync(DocumentDto doc)
+    {
+        error = null;
+        readingId = doc.Id;
+        try
+        {
+            var response = await Http.PostAsync($"api/ai/receipt/{doc.Id}", null);
+            if (!response.IsSuccessStatusCode) { error = await ProblemText(response); return; }
+            receipt = await response.Content.ReadFromJsonAsync<ReceiptReadDto>();
+            receiptDocumentId = doc.Id;
+            updateAsset = true;
+        }
+        finally
+        {
+            readingId = null;
+        }
+    }
+
+    async Task ApplyReceiptAsync(Guid documentId)
+    {
+        if (receipt is null) return;
+        var response = await Http.PostAsJsonAsync($"api/documents/{documentId}/apply-receipt", new ApplyReceiptInput(receipt, updateAsset));
+        if (!response.IsSuccessStatusCode) { error = await ProblemText(response); return; }
+        receipt = null;
+        await ReloadAsync();
+    }
+
+    static async Task<string> ProblemText(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("detail", out var detail)) return detail.GetString() ?? body;
+            if (json.RootElement.ValueKind == JsonValueKind.String) return json.RootElement.GetString() ?? body;
+        }
+        catch (JsonException)
+        {
+        }
+        return body;
     }
 
     async Task ReloadAsync() => documents = await Http.GetFromJsonAsync<List<DocumentDto>>("api/documents") ?? [];

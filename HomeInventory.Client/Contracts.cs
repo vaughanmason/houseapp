@@ -26,6 +26,11 @@ public sealed record LookupsDto(IReadOnlyList<string> AssetCategories, IReadOnly
 public sealed record NetworkStatusDto(bool Enabled, int Port, bool HasPin, bool ListeningOnNetwork, IReadOnlyList<string> Addresses, bool RestartRequired);
 public sealed record NetworkSettingsInput(bool Enabled, string? Pin, int? Port);
 public sealed record BarcodeResultDto(string Text, string Format);
+public sealed record AssistantStatusDto(bool Enabled);
+public sealed record ReceiptLineDto(string Description, decimal? Quantity, decimal? Price);
+public sealed record ReceiptReadDto(string? Merchant, DateOnly? PurchaseDate, decimal? Total, string? Currency, IReadOnlyList<ReceiptLineDto> Items, int? WarrantyMonths, string Summary);
+public sealed record ApplyReceiptInput(ReceiptReadDto Receipt, bool UpdateAsset);
+public sealed record AssetSuggestionDto(string Name, string Category, string? Brand, string? Model, string? Description, decimal? EstimatedValue, string Confidence);
 public sealed record UploadedFileDto(string StorageKey, string FileName, string ContentType, long SizeBytes);
 public sealed record DocumentDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? FixtureId, Guid? AssetId, Guid? MaintenanceTaskId, string Title, string Kind, string StorageKey, string? FileName, string? ContentType, long? SizeBytes, DateOnly? DocumentDate, DateOnly? ExpiresOn, string? Tags, string? Notes, string PropertyName, string? AttachedTo);
 public sealed record MaintenanceTaskDto(Guid Id, Guid PropertyId, Guid? FixtureId, string Title, int? IntervalValue, string? IntervalUnit, DateOnly? DueOn, DateOnly? LastCompletedOn, string? Supplier, decimal? EstimatedCost, string? Notes, string PropertyName, string? FixtureName, string Currency);
