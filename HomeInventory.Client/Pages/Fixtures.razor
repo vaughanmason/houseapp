@@ -110,8 +110,8 @@
                                         @if (fixture.PurchasePrice.HasValue || fixture.CurrentValue.HasValue)
                                         {
                                             <div class="small text-muted">
-                                                Purchase: <CurrencyDisplay Value="fixture.PurchasePrice" CurrencyCode="GetPropertyCurrency(fixture)" /> · 
-                                                Current: <CurrencyDisplay Value="fixture.CurrentValue" CurrencyCode="GetPropertyCurrency(fixture)" />
+                                                Purchase: <CurrencyDisplay Value="fixture.PurchasePrice" CurrencyCode="@GetPropertyCurrency(fixture)" /> · 
+                                                Current: <CurrencyDisplay Value="fixture.CurrentValue" CurrencyCode="@GetPropertyCurrency(fixture)" />
                                             </div>
                                         }
                                         @if (!string.IsNullOrEmpty(fixture.Condition))

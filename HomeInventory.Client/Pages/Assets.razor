@@ -109,8 +109,8 @@
                                 @if (asset.PurchasePrice.HasValue || asset.CurrentValue.HasValue)
                                 {
                                     <div class="small text-muted">
-                                        Purchase: <CurrencyDisplay Value="asset.PurchasePrice" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" /> · 
-                                        Current: <CurrencyDisplay Value="asset.CurrentValue" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" />
+                                        Purchase: <CurrencyDisplay Value="asset.PurchasePrice" CurrencyCode="@GetPropertyCurrency(asset.PropertyId)" /> · 
+                                        Current: <CurrencyDisplay Value="asset.CurrentValue" CurrencyCode="@GetPropertyCurrency(asset.PropertyId)" />
                                     </div>
                                 }
                             </div>
@@ -170,7 +170,7 @@
                                             <li>
                                                 <strong>@item.OccurredOn.ToString("yyyy-MM-dd")</strong> · @item.Kind
                                                 @if (!string.IsNullOrEmpty(item.Description)) { <span> — @item.Description</span> }
-                                                @if (item.Cost is not null) { <span> · <CurrencyDisplay Value="item.Cost" CurrencyCode="GetPropertyCurrency(asset.PropertyId)" /></span> }
+                                                @if (item.Cost is not null) { <span> · <CurrencyDisplay Value="item.Cost" CurrencyCode="@GetPropertyCurrency(asset.PropertyId)" /></span> }
                                                 @if (ManualEventKinds.Contains(item.Kind)) { <button class="btn btn-link btn-sm p-0 ms-1 text-danger" @onclick="@(() => pending = new("Remove history entry", $"Remove the {item.Kind} entry from {item.OccurredOn:yyyy-MM-dd}?", () => DeleteEvent(asset.Id, item.Id)))">remove</button> }
                                             </li>
                                         }

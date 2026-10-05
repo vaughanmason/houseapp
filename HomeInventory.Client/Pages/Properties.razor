@@ -54,7 +54,7 @@
                         <div class="text-muted">@p.Address</div>
                         <div class="small text-muted">
                             Purchased: @FormatDate(p.PurchaseDate) · 
-                            Price: <CurrencyDisplay Value="p.PurchasePrice" CurrencyCode="p.Currency" /> · 
+                            Price: <CurrencyDisplay Value="p.PurchasePrice" CurrencyCode="@p.Currency" /> · 
                             Floor area: @FormatNumber(p.FloorArea) · 
                             Currency: @p.Currency
                         </div>
