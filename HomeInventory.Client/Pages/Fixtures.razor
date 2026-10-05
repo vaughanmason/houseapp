@@ -48,7 +48,8 @@
             <input class="form-control mb-2" @bind="fixtureSerialNumber" placeholder="Serial number" />
 
             <h5 class="mt-3">Financial</h5>
-            <input class="form-control mb-2" @bind="fixturePurchaseDate" placeholder="Purchase date (YYYY-MM-DD)" />
+            <label class="form-label small text-muted mb-1" for="fixture-purchase-date">Purchase date</label>
+            <input class="form-control mb-2" id="fixture-purchase-date" type="date" @bind="fixturePurchaseDate" />
             <div class="row g-2 mb-2">
                 <div class="col-md-6"><input class="form-control" @bind="fixturePurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
                 <div class="col-md-6"><input class="form-control" @bind="fixtureCurrentValue" type="number" step="0.01" placeholder="Current value" /></div>
@@ -58,7 +59,8 @@
             <input class="form-control mb-2" @bind="fixtureWarranty" placeholder="Warranty" />
             <input class="form-control mb-2" @bind="fixtureManualUrl" placeholder="Manual URL" />
             <input class="form-control mb-2" @bind="fixtureInstallerName" list="contact-names" placeholder="Installer" />
-            <input class="form-control mb-2" @bind="fixtureInstallationDate" placeholder="Installation date (YYYY-MM-DD)" />
+            <label class="form-label small text-muted mb-1" for="fixture-installation-date">Installation date</label>
+            <input class="form-control mb-2" id="fixture-installation-date" type="date" @bind="fixtureInstallationDate" />
             <p class="small text-muted mb-2">Schedule servicing on the <a href="maintenance">Maintenance</a> page.</p>
 
             <h5 class="mt-3">Details</h5>
@@ -176,8 +178,9 @@
     List<FloorDto> floors = [];
 
     string roomId = "", fixtureName = "", fixtureType = "", fixtureManufacturer = "", fixtureModel = "", fixtureSerialNumber = "";
-    string fixturePurchaseDate = "", fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "";
-    string fixtureInstallerName = "", fixtureInstallationDate = "", fixtureCondition = "", fixtureNotes = "";
+    DateOnly? fixturePurchaseDate, fixtureInstallationDate;
+    string fixturePurchasePrice = "", fixtureCurrentValue = "", fixtureWarranty = "", fixtureManualUrl = "";
+    string fixtureInstallerName = "", fixtureCondition = "", fixtureNotes = "";
     string photoFixtureId = "", fixtureCategory = "Fixture", fixtureProvider = "", fixtureAccountNumber = "";
 
     static readonly string[] FixtureTypes = ["Sink", "Toilet", "Shower", "Bath", "Built-in cupboard", "Window", "Door", "Air conditioner", "Ceiling fan", "Light fitting", "Alarm", "Oven", "Hob", "Extractor"];
@@ -214,13 +217,13 @@
         fixtureManufacturer = fixture.Manufacturer ?? "";
         fixtureModel = fixture.Model ?? "";
         fixtureSerialNumber = fixture.SerialNumber ?? "";
-        fixturePurchaseDate = fixture.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        fixturePurchaseDate = fixture.PurchaseDate;
         fixturePurchasePrice = fixture.PurchasePrice?.ToString() ?? "";
         fixtureCurrentValue = fixture.CurrentValue?.ToString() ?? "";
         fixtureWarranty = fixture.Warranty ?? "";
         fixtureManualUrl = fixture.ManualUrl ?? "";
         fixtureInstallerName = fixture.InstallerName ?? "";
-        fixtureInstallationDate = fixture.InstallationDate?.ToString("yyyy-MM-dd") ?? "";
+        fixtureInstallationDate = fixture.InstallationDate;
         fixtureCondition = fixture.Condition ?? "";
         fixtureNotes = fixture.Notes ?? "";
         fixtureCategory = fixture.Category;
@@ -237,8 +240,9 @@
     void ClearForm()
     {
         roomId = fixtureName = fixtureType = fixtureManufacturer = fixtureModel = fixtureSerialNumber = "";
-        fixturePurchaseDate = fixturePurchasePrice = fixtureCurrentValue = fixtureWarranty = fixtureManualUrl = "";
-        fixtureInstallerName = fixtureInstallationDate = fixtureCondition = fixtureNotes = "";
+        fixturePurchaseDate = fixtureInstallationDate = null;
+        fixturePurchasePrice = fixtureCurrentValue = fixtureWarranty = fixtureManualUrl = "";
+        fixtureInstallerName = fixtureCondition = fixtureNotes = "";
         fixtureProvider = fixtureAccountNumber = "";
         fixtureCategory = Category ?? "Fixture";
     }
@@ -250,8 +254,8 @@
         if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(fixtureType)) { error = "Name and type are required."; return; }
 
         var response = editingFixtureId is null
-            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null))
-            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, TryDateOnly(fixturePurchaseDate), TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, TryDateOnly(fixtureInstallationDate), fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null));
+            ? await Http.PostAsJsonAsync($"api/rooms/{parsedRoomId}/fixtures", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, fixturePurchaseDate, TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, fixtureInstallationDate, fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null))
+            : await Http.PutAsJsonAsync($"api/fixtures/{editingFixtureId}", new FixtureInput(parsedRoomId, fixtureName, fixtureType, fixtureManufacturer, fixtureModel, fixtureSerialNumber, fixturePurchaseDate, TryDecimal(fixturePurchasePrice), TryDecimal(fixtureCurrentValue), fixtureWarranty, fixtureManualUrl, fixtureInstallerName, fixtureInstallationDate, fixtureCondition, fixtureNotes, fixtureCategory, fixtureCategory == "Utility" ? fixtureProvider : null, fixtureCategory == "Utility" ? fixtureAccountNumber : null));
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingFixtureId = null;
@@ -277,7 +281,6 @@
         return property?.Currency ?? "USD";
     }
 
-    static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
     static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
     static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
 }

@@ -42,7 +42,8 @@
             <input class="form-control mb-2" @bind="assetManualUrl" placeholder="Manual link (URL)" />
 
             <h5 class="mt-3">Financial</h5>
-            <input class="form-control mb-2" @bind="assetPurchaseDate" placeholder="Purchase date (YYYY-MM-DD)" />
+            <label class="form-label small text-muted mb-1" for="asset-purchase-date">Purchase date</label>
+            <input class="form-control mb-2" id="asset-purchase-date" type="date" @bind="assetPurchaseDate" />
             <div class="row g-2 mb-2">
                 <div class="col-md-6"><input class="form-control" @bind="assetPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
                 <div class="col-md-6"><input class="form-control" @bind="assetCurrentValue" type="number" step="0.01" placeholder="Current value" /></div>
@@ -288,7 +289,8 @@
     List<AssetDto> assets = [];
 
     string propertyId = "", roomId = "", storageLocationId = "", assetName = "", assetCategory = "", assetDescription = "";
-    string assetBrand = "", assetModel = "", assetSerialNumber = "", assetPurchaseDate = "";
+    string assetBrand = "", assetModel = "", assetSerialNumber = "";
+    DateOnly? assetPurchaseDate;
     string assetPurchasePrice = "", assetCurrentValue = "", assetCondition = "", assetNotes = "", assetBarcode = "", assetManualUrl = "";
     string storagePropertyId = "", newStorageParentId = "", newStorageName = "", newStorageType = "";
     string photoAssetId = "";
@@ -359,7 +361,7 @@
         assetBrand = asset.Brand ?? "";
         assetModel = asset.Model ?? "";
         assetSerialNumber = asset.SerialNumber ?? "";
-        assetPurchaseDate = asset.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        assetPurchaseDate = asset.PurchaseDate;
         assetPurchasePrice = asset.PurchasePrice?.ToString() ?? "";
         assetCurrentValue = asset.CurrentValue?.ToString() ?? "";
         assetCondition = asset.Condition ?? "";
@@ -377,7 +379,8 @@
     void ClearForm()
     {
         propertyId = roomId = storageLocationId = assetName = assetCategory = assetDescription = "";
-        assetBrand = assetModel = assetSerialNumber = assetPurchaseDate = "";
+        assetBrand = assetModel = assetSerialNumber = "";
+        assetPurchaseDate = null;
         assetPurchasePrice = assetCurrentValue = assetCondition = assetNotes = "";
         assetBarcode = assetManualUrl = "";
     }
@@ -420,8 +423,8 @@
         var storageLocIdGuid = Guid.TryParse(storageLocationId, out var slid) ? (Guid?)slid : null;
 
         var response = editingAssetId is null
-            ? await Http.PostAsJsonAsync("api/assets", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes, assetBarcode, assetManualUrl))
-            : await Http.PutAsJsonAsync($"api/assets/{editingAssetId}", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, TryDateOnly(assetPurchaseDate), TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes, assetBarcode, assetManualUrl));
+            ? await Http.PostAsJsonAsync("api/assets", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, assetPurchaseDate, TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes, assetBarcode, assetManualUrl))
+            : await Http.PutAsJsonAsync($"api/assets/{editingAssetId}", new AssetInput(propId, roomIdGuid, storageLocIdGuid, assetName, assetCategory, assetDescription, assetBrand, assetModel, assetSerialNumber, assetPurchaseDate, TryDecimal(assetPurchasePrice), TryDecimal(assetCurrentValue), assetCondition, assetNotes, assetBarcode, assetManualUrl));
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
         editingAssetId = null;
@@ -522,7 +525,6 @@
 
     string GetPropertyCurrency(Guid? propertyId) => properties.FirstOrDefault(x => x.Id == propertyId)?.Currency ?? "USD";
     
-    static DateOnly? TryDateOnly(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
     static decimal? TryDecimal(string? value) => decimal.TryParse(value, out var result) ? result : null;
     static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
 }

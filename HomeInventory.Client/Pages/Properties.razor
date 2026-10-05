@@ -16,7 +16,7 @@
             <input class="form-control mb-2" @bind="propertyName" placeholder="Property name" />
             <input class="form-control mb-2" @bind="propertyAddress" placeholder="Address (optional)" />
             <div class="row g-2 mb-2">
-                <div class="col-md-6"><input class="form-control" @bind="propertyPurchaseDate" placeholder="YYYY-MM-DD" /></div>
+                <div class="col-md-6"><input class="form-control" type="date" @bind="propertyPurchaseDate" title="Purchase date" aria-label="Purchase date" /></div>
                 <div class="col-md-6"><input class="form-control" @bind="propertyPurchasePrice" type="number" step="0.01" placeholder="Purchase price" /></div>
             </div>
             <input class="form-control mb-2" @bind="propertyFloorArea" type="number" step="0.01" placeholder="Floor area" />
@@ -103,7 +103,8 @@
 @code {
     List<PropertyDto> properties = [];
 
-    string propertyName = "", propertyAddress = "", propertyPurchaseDate = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyCurrency = "USD", propertyNotes = "";
+    DateOnly? propertyPurchaseDate;
+    string propertyName = "", propertyAddress = "", propertyPurchasePrice = "", propertyFloorArea = "", propertyCurrency = "USD", propertyNotes = "";
     string photoPropertyId = "";
 
     Guid? editingPropertyId;
@@ -128,6 +129,7 @@
     async Task Load()
     {
         properties = await Http.GetFromJsonAsync<List<PropertyDto>>("api/properties") ?? [];
+        if (editingPropertyId is null) propertyCurrency = DefaultCurrency();
     }
 
     void StartEdit(PropertyDto property)
@@ -135,7 +137,7 @@
         editingPropertyId = property.Id;
         propertyName = property.Name;
         propertyAddress = property.Address ?? "";
-        propertyPurchaseDate = property.PurchaseDate?.ToString("yyyy-MM-dd") ?? "";
+        propertyPurchaseDate = property.PurchaseDate;
         propertyPurchasePrice = property.PurchasePrice?.ToString() ?? "";
         propertyFloorArea = property.FloorArea?.ToString() ?? "";
         propertyCurrency = property.Currency ?? "USD";
@@ -150,8 +152,9 @@
 
     void ClearForm()
     {
-        propertyName = propertyAddress = propertyPurchaseDate = propertyPurchasePrice = propertyFloorArea = propertyNotes = "";
-        propertyCurrency = "USD";
+        propertyName = propertyAddress = propertyPurchasePrice = propertyFloorArea = propertyNotes = "";
+        propertyPurchaseDate = null;
+        propertyCurrency = DefaultCurrency();
     }
 
     async Task SaveProperty()
@@ -162,11 +165,11 @@
         HttpResponseMessage response;
         if (editingPropertyId is null)
         {
-            response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
+            response = await Http.PostAsJsonAsync("api/properties", new PropertyInput(propertyName, propertyAddress, propertyPurchaseDate, TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
         }
         else
         {
-            response = await Http.PutAsJsonAsync($"api/properties/{editingPropertyId}", new PropertyInput(propertyName, propertyAddress, TryDate(propertyPurchaseDate), TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
+            response = await Http.PutAsJsonAsync($"api/properties/{editingPropertyId}", new PropertyInput(propertyName, propertyAddress, propertyPurchaseDate, TryDecimal(propertyPurchasePrice), TryDecimal(propertyFloorArea), propertyNotes, propertyCurrency));
         }
 
         if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
@@ -177,7 +180,8 @@
 
     static string FormatDate(DateOnly? date) => date?.ToString("yyyy-MM-dd") ?? "-";
     static string FormatNumber(decimal? number) => number?.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) ?? "-";
-    static DateOnly? TryDate(string? value) => DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var result) ? result : null;
+    // New properties start in the currency most existing properties use (USD when there are none).
+    string DefaultCurrency() => properties.GroupBy(x => x.Currency).OrderByDescending(x => x.Count()).Select(x => x.Key).FirstOrDefault() ?? "USD";
     static decimal? TryDecimal(string? value) => decimal.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var result) ? result : null;
     static int? TryInt(string? value) => int.TryParse(value, out var result) ? result : null;
 }
