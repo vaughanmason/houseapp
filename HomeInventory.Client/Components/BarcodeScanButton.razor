@@ -1,0 +1,38 @@
+@inject HttpClient Http
+
+@* Opens the phone camera (or a file picker on a computer), sends the photo to the server and reports the barcode it contains. *@
+<label class="btn @ButtonClass mb-0 @(busy ? "disabled" : "")" title="Take a photo of a barcode">
+    @(busy ? "Reading…" : Label)
+    <InputFile OnChange="ScanAsync" accept="image/*" capture="environment" class="d-none" />
+</label>
+@if (error is not null) { <div class="small text-danger mt-1">@error</div> }
+
+@code {
+    const long MaxBytes = 20 * 1024 * 1024;
+
+    [Parameter] public string Label { get; set; } = "Scan";
+    [Parameter] public string ButtonClass { get; set; } = "btn-outline-secondary";
+    [Parameter] public EventCallback<string> Scanned { get; set; }
+
+    bool busy;
+    string? error;
+
+    async Task ScanAsync(InputFileChangeEventArgs e)
+    {
+        error = null;
+        if (e.File.Size > MaxBytes) { error = "Photos must be 20 MB or smaller."; return; }
+        busy = true;
+        try
+        {
+            using var content = new MultipartFormDataContent { { new StreamContent(e.File.OpenReadStream(MaxBytes)), "file", e.File.Name } };
+            var response = await Http.PostAsync("api/barcode", content);
+            if (!response.IsSuccessStatusCode) { error = (await response.Content.ReadAsStringAsync()).Trim('"'); return; }
+            var result = (await response.Content.ReadFromJsonAsync<BarcodeResultDto>())!;
+            await Scanned.InvokeAsync(result.Text);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

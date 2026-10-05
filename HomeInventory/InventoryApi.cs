@@ -688,6 +688,29 @@ public static class InventoryApi
             var (key, error) = await store.SaveAsync(stream, file.Length);
             return key is null ? Results.BadRequest(error) : Results.Ok(new UploadedFileDto(key, System.IO.Path.GetFileName(file.FileName), FileStore.ContentTypeFor(key), file.Length));
         }).DisableAntiforgery(); // multipart uploads from the local WASM client; JSON endpoints don't use antiforgery either
+        // Reads a barcode or QR code from a photo (taken with the phone camera; works over plain HTTP, unlike live camera scanning).
+        api.MapPost("/barcode", async (IFormFile file) =>
+        {
+            if (file.Length is 0 or > FileStore.MaxBytes) return Results.BadRequest("Photos must be between 1 byte and 20 MB.");
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                var (pixels, width, height) = await Task.Run(() => ImageTools.ReadRgb(stream));
+                var reader = new ZXing.BarcodeReaderGeneric
+                {
+                    AutoRotate = true,
+                    Options = new ZXing.Common.DecodingOptions { TryHarder = true, TryInverted = true },
+                };
+                var result = reader.Decode(new ZXing.RGBLuminanceSource(pixels, width, height, ZXing.RGBLuminanceSource.BitmapFormat.RGB24));
+                return result is null
+                    ? Results.NotFound("No barcode found. Try again closer, with the barcode flat and in focus.")
+                    : Results.Ok(new BarcodeResultDto(result.Text, result.BarcodeFormat.ToString()));
+            }
+            catch (ImageMagick.MagickException)
+            {
+                return Results.BadRequest("That file is not an image.");
+            }
+        }).DisableAntiforgery();
         api.MapGet("/files/{**key}", async (string key, string? size, FileStore store, HttpContext context) =>
         {
             context.Response.Headers.XContentTypeOptions = "nosniff";

@@ -38,7 +38,10 @@
             <input class="form-control mb-2" @bind="assetBrand" list="brands" placeholder="Brand" />
             <input class="form-control mb-2" @bind="assetModel" placeholder="Model" />
             <input class="form-control mb-2" @bind="assetSerialNumber" placeholder="Serial number" />
-            <input class="form-control mb-2" @bind="assetBarcode" placeholder="Barcode (EAN/UPC or your own label)" />
+            <div class="input-group mb-2">
+                <input class="form-control" @bind="assetBarcode" placeholder="Barcode (EAN/UPC or your own label)" />
+                <BarcodeScanButton Scanned="code => assetBarcode = code" />
+            </div>
             <input class="form-control mb-2" @bind="assetManualUrl" placeholder="Manual link (URL)" />
 
             <h5 class="mt-3">Financial</h5>

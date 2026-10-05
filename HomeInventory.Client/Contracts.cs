@@ -25,6 +25,7 @@ public sealed record ContactDto(Guid Id, string Name, string? Company, string Ki
 public sealed record LookupsDto(IReadOnlyList<string> AssetCategories, IReadOnlyList<string> Brands, IReadOnlyList<string> ContactNames);
 public sealed record NetworkStatusDto(bool Enabled, int Port, bool HasPin, bool ListeningOnNetwork, IReadOnlyList<string> Addresses, bool RestartRequired);
 public sealed record NetworkSettingsInput(bool Enabled, string? Pin, int? Port);
+public sealed record BarcodeResultDto(string Text, string Format);
 public sealed record UploadedFileDto(string StorageKey, string FileName, string ContentType, long SizeBytes);
 public sealed record DocumentDto(Guid Id, Guid PropertyId, Guid? RoomId, Guid? FixtureId, Guid? AssetId, Guid? MaintenanceTaskId, string Title, string Kind, string StorageKey, string? FileName, string? ContentType, long? SizeBytes, DateOnly? DocumentDate, DateOnly? ExpiresOn, string? Tags, string? Notes, string PropertyName, string? AttachedTo);
 public sealed record MaintenanceTaskDto(Guid Id, Guid PropertyId, Guid? FixtureId, string Title, int? IntervalValue, string? IntervalUnit, DateOnly? DueOn, DateOnly? LastCompletedOn, string? Supplier, decimal? EstimatedCost, string? Notes, string PropertyName, string? FixtureName, string Currency);

@@ -1183,6 +1183,40 @@ public sealed class InventoryValidationTests
         Assert.Empty(Directory.GetFiles(factory.FilesPath, "*.heic", SearchOption.AllDirectories));
     }
 
+    [Theory]
+    [InlineData(ZXing.BarcodeFormat.EAN_13, "5901234123457")]
+    [InlineData(ZXing.BarcodeFormat.QR_CODE, "http://192.168.1.10:5068/scan/asset/123")]
+    public async Task Barcode_IsReadFromAPhoto(ZXing.BarcodeFormat format, string text)
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        var writer = new ZXing.BarcodeWriterPixelData { Format = format, Options = new ZXing.Common.EncodingOptions { Width = 600, Height = format == ZXing.BarcodeFormat.QR_CODE ? 600 : 240, Margin = 20 } };
+        var drawn = writer.Write(text);
+        using var photo = new ImageMagick.MagickImage(drawn.Pixels, new ImageMagick.PixelReadSettings((uint)drawn.Width, (uint)drawn.Height, ImageMagick.StorageType.Char, ImageMagick.PixelMapping.BGRA));
+
+        var response = await PostImageAsync(client, "/api/barcode", photo.ToByteArray(ImageMagick.MagickFormat.Jpeg), "photo.jpg");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = (await response.Content.ReadFromJsonAsync<BarcodeResultDto>())!;
+        Assert.Equal((text, format.ToString()), (result.Text, result.Format));
+    }
+
+    [Fact]
+    public async Task Barcode_ReportsMissingBarcodeAndRejectsNonImages()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = CreateClient(factory);
+        using var blank = new ImageMagick.MagickImage(ImageMagick.MagickColors.White, 400, 300);
+        Assert.Equal(HttpStatusCode.NotFound, (await PostImageAsync(client, "/api/barcode", blank.ToByteArray(ImageMagick.MagickFormat.Png), "blank.png")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostImageAsync(client, "/api/barcode", "not an image"u8.ToArray(), "notes.txt")).StatusCode);
+    }
+
+    private static async Task<HttpResponseMessage> PostImageAsync(HttpClient client, string url, byte[] bytes, string fileName)
+    {
+        using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
+        return await client.PostAsync(url, content);
+    }
+
     private static Task<HttpResponseMessage> SignInAsync(HttpClient client, string pin, string returnUrl = "/") =>
         client.PostAsync("/pin", new FormUrlEncodedContent(new Dictionary<string, string> { ["pin"] = pin, ["returnUrl"] = returnUrl }));
 
