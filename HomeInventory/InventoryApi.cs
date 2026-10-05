@@ -686,7 +686,7 @@ public static class InventoryApi
         {
             await using var stream = file.OpenReadStream();
             var (key, error) = await store.SaveAsync(stream, file.Length);
-            return key is null ? Results.BadRequest(error) : Results.Ok(new UploadedFileDto(key, System.IO.Path.GetFileName(file.FileName), FileStore.ContentTypeFor(key), file.Length));
+            return key is null ? Results.BadRequest(error) : Results.Ok(new UploadedFileDto(key, System.IO.Path.GetFileName(file.FileName), FileStore.ContentTypeFor(key), store.SizeOf(key)));
         }).DisableAntiforgery(); // multipart uploads from the local WASM client; JSON endpoints don't use antiforgery either
         // Reads a barcode or QR code from a photo (taken with the phone camera; works over plain HTTP, unlike live camera scanning).
         api.MapPost("/barcode", async (IFormFile file) =>

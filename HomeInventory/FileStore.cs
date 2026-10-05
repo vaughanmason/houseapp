@@ -130,6 +130,9 @@ public sealed partial class FileStore(string rootPath)
         }
     }
 
+    /// <summary>Size of a stored file in bytes (after any conversion), or 0 if it doesn't exist.</summary>
+    public long SizeOf(string key) => IsStoredKey(key) && File.Exists(FullPath(key)) ? new FileInfo(FullPath(key)).Length : 0;
+
     public Stream? Open(string key) => IsStoredKey(key) && File.Exists(FullPath(key)) ? File.OpenRead(FullPath(key)) : null;
 
     public void Delete(string key)
