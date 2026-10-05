@@ -14,6 +14,12 @@ builder.Services.AddDbContext<InventoryDbContext>(options => options.UseSqlite($
 builder.Services.AddSingleton(new FileStore(builder.Configuration["Storage:FilesPath"] ?? Path.Combine(dataDirectory, "files")));
 builder.Services.AddHostedService<OrphanFileSweeper>();
 
+// Other devices on the home network can use the app (behind a PIN) once network access is turned on; it takes effect after a restart.
+var networkSettingsPath = Path.Combine(dataDirectory, "network.json");
+var networkSettings = NetworkSettingsStore.Load(networkSettingsPath);
+if (networkSettings.Enabled && networkSettings.HasPin) builder.WebHost.UseUrls($"http://0.0.0.0:{networkSettings.Port}");
+builder.Services.AddNetworkAccess(networkSettingsPath);
+
 var app = builder.Build();
 
 await using (var scope = app.Services.CreateAsyncScope())
@@ -32,6 +38,7 @@ else
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
+app.UseNetworkAccess();
 // API callers get raw status codes; re-executing /not-found would turn e.g. DELETE 404s into 405s.
 app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"),
     branch => branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
@@ -45,6 +52,7 @@ app.MapRazorComponents<App>()
     .AddAdditionalAssemblies(typeof(HomeInventory.Client._Imports).Assembly);
 
 app.MapInventoryApi();
+app.MapNetworkAccess();
 
 app.Run();
 

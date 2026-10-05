@@ -1,0 +1,112 @@
+@page "/network"
+@inject HttpClient Http
+
+<PageTitle>Network access</PageTitle>
+
+<div class="mb-4">
+    <h1>Network access</h1>
+    <p class="lead">Use Home Inventory from your phone or other computers on your home network, protected by a PIN.</p>
+</div>
+
+@if (status is null)
+{
+    <p>@(loadError ?? "Loading…")</p>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card card-body">
+                <h2 class="h4">Settings</h2>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="enabled" @bind="enabled" />
+                    <label class="form-check-label" for="enabled">Allow devices on my home network</label>
+                </div>
+                <label class="form-label" for="pin">@(status.HasPin ? "Change PIN (leave empty to keep the current one)" : "PIN")</label>
+                <input class="form-control mb-2" id="pin" type="password" inputmode="numeric" autocomplete="new-password" @bind="pin" placeholder="4 to 12 characters" />
+                <label class="form-label" for="port">Port</label>
+                <input class="form-control mb-3" id="port" type="number" min="1024" max="65535" @bind="port" />
+                <div>
+                    <button class="btn btn-primary" @onclick="SaveAsync">Save</button>
+                </div>
+                <p class="small text-muted mt-3 mb-0">
+                    This computer never needs the PIN. Devices enter it once and stay signed in for 30 days; changing the PIN signs them all out.
+                    Only home-network addresses are accepted. The app is never reachable from the internet.
+                </p>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card card-body">
+                <h2 class="h4">Status</h2>
+                @if (status.RestartRequired)
+                {
+                    <div class="alert alert-warning">
+                        Restart Home Inventory to @(status.Enabled ? "start" : "stop") listening on the network.
+                        @if (status.Enabled) { <span>The first time, Windows may ask whether to allow it through the firewall. Choose <strong>Private networks</strong>.</span> }
+                    </div>
+                }
+                else if (status.Enabled)
+                {
+                    <div class="alert alert-success">Network access is on. Open one of these addresses on your phone:</div>
+                }
+                else
+                {
+                    <div class="alert alert-secondary">Network access is off. Only this computer can use Home Inventory.</div>
+                }
+
+                @if (status.Enabled && status.Addresses.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-3">
+                        @foreach (var address in status.Addresses)
+                        {
+                            <div class="text-center">
+                                <img src="@($"api/qr?text={Uri.EscapeDataString(address)}")" alt="QR code for @address" width="140" height="140" />
+                                <div class="small"><code>@address</code></div>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (status.Enabled)
+                {
+                    <p class="text-muted">No home-network connection was found on this computer.</p>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (message is not null) { <div class="alert alert-info mt-3">@message</div> }
+@if (error is not null) { <div class="alert alert-danger mt-3">@error</div> }
+
+@code {
+    NetworkStatusDto? status;
+    bool enabled;
+    string pin = "";
+    int port = 5068;
+    string? message, error, loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await Http.GetAsync("api/network");
+        if (!response.IsSuccessStatusCode) { loadError = "Network settings can only be changed on the Home Inventory computer itself."; return; }
+        Apply((await response.Content.ReadFromJsonAsync<NetworkStatusDto>())!);
+    }
+
+    void Apply(NetworkStatusDto value)
+    {
+        status = value;
+        enabled = value.Enabled;
+        port = value.Port;
+        pin = "";
+    }
+
+    async Task SaveAsync()
+    {
+        message = error = null;
+        var response = await Http.PutAsJsonAsync("api/network", new NetworkSettingsInput(enabled, string.IsNullOrWhiteSpace(pin) ? null : pin, port));
+        if (!response.IsSuccessStatusCode) { error = await response.Content.ReadAsStringAsync(); return; }
+        Apply((await response.Content.ReadFromJsonAsync<NetworkStatusDto>())!);
+        message = "Saved.";
+    }
+}

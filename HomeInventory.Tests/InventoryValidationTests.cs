@@ -1082,6 +1082,68 @@ public sealed class InventoryValidationTests
         Assert.True(File.Exists(PathOf(fresh))); // too new: may still be waiting to be attached
     }
 
+    [Fact]
+    public async Task NetworkAccess_RequiresHomeNetworkEnabledSettingAndPin()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var local = CreateClient(factory);
+        using var phone = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://localhost"), AllowAutoRedirect = false, HandleCookies = true });
+        phone.DefaultRequestHeaders.Add(CustomWebApplicationFactory.RemoteIpHeader, "192.168.1.50");
+        using var outsider = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://localhost"), AllowAutoRedirect = false });
+        outsider.DefaultRequestHeaders.Add(CustomWebApplicationFactory.RemoteIpHeader, "203.0.113.9");
+
+        // This computer always works; other devices are refused while network access is off.
+        Assert.Equal(HttpStatusCode.OK, (await local.GetAsync("/api/properties")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await phone.GetAsync("/api/properties")).StatusCode);
+
+        // Settings can only be changed from this computer, and a PIN is required.
+        Assert.Equal(HttpStatusCode.Forbidden, (await phone.PutAsJsonAsync("/api/network", new NetworkSettingsInput(true, "2468", null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await local.PutAsJsonAsync("/api/network", new NetworkSettingsInput(true, null, null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await local.PutAsJsonAsync("/api/network", new NetworkSettingsInput(true, "12", null))).StatusCode);
+        var status = (await (await local.PutAsJsonAsync("/api/network", new NetworkSettingsInput(true, "2468", null))).Content.ReadFromJsonAsync<NetworkStatusDto>())!;
+        Assert.True(status.Enabled && status.HasPin);
+        Assert.DoesNotContain("2468", await File.ReadAllTextAsync(Path.Combine(factory.FilesPath, "network.json"))); // stored hashed
+
+        // Public addresses are never allowed; home-network devices must sign in with the PIN.
+        Assert.Equal(HttpStatusCode.Forbidden, (await outsider.GetAsync("/api/properties")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await phone.GetAsync("/api/properties")).StatusCode);
+        var page = await phone.GetAsync("/assets");
+        Assert.Equal(HttpStatusCode.Redirect, page.StatusCode);
+        Assert.StartsWith("/pin", page.Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SignInAsync(phone, "0000")).StatusCode);
+        var signIn = await SignInAsync(phone, "2468", "/assets");
+        Assert.Equal(HttpStatusCode.Redirect, signIn.StatusCode);
+        Assert.Equal("/assets", signIn.Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, (await phone.GetAsync("/api/properties")).StatusCode);
+
+        // A new PIN signs every device out.
+        await local.PutAsJsonAsync("/api/network", new NetworkSettingsInput(true, "13579", null));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await phone.GetAsync("/api/properties")).StatusCode);
+
+        // Turning access off blocks devices again, even with a valid cookie.
+        await SignInAsync(phone, "13579");
+        await local.PutAsJsonAsync("/api/network", new NetworkSettingsInput(false, null, null));
+        Assert.Equal(HttpStatusCode.Forbidden, (await phone.GetAsync("/api/properties")).StatusCode);
+    }
+
+    [Fact]
+    public async Task NetworkAccess_LocksOutAfterRepeatedWrongPins_AndIgnoresOffSiteReturnUrls()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var local = CreateClient(factory);
+        await local.PutAsJsonAsync("/api/network", new NetworkSettingsInput(true, "2468", null));
+        using var phone = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://localhost"), AllowAutoRedirect = false });
+        phone.DefaultRequestHeaders.Add(CustomWebApplicationFactory.RemoteIpHeader, "10.0.0.77");
+
+        var offSite = await SignInAsync(phone, "2468", "//evil.example/");
+        Assert.Equal("/", offSite.Headers.Location!.OriginalString);
+        for (var attempt = 0; attempt < 5; attempt++) await SignInAsync(phone, "9999");
+        Assert.Equal((HttpStatusCode)429, (await SignInAsync(phone, "2468")).StatusCode); // even the right PIN waits out the lockout
+    }
+
+    private static Task<HttpResponseMessage> SignInAsync(HttpClient client, string pin, string returnUrl = "/") =>
+        client.PostAsync("/pin", new FormUrlEncodedContent(new Dictionary<string, string> { ["pin"] = pin, ["returnUrl"] = returnUrl }));
+
     private static async Task<HttpResponseMessage> PostFileAsync(HttpClient client, byte[] bytes, string fileName)
     {
         using var content = new MultipartFormDataContent { { new ByteArrayContent(bytes), "file", fileName } };
